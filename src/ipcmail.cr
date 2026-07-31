@@ -21,7 +21,7 @@ require "./ipcmail/address"
 require "./ipcmail/monitor"
 
 module IPCMail
-  VERSION = "0.1.0"
+  VERSION = {{ `shards version "#{__DIR__}"`.chomp.stringify }}
 
   def self.create(uri : String, *, capacity : Int? = nil, block_size : Int? = nil,
                   blocks : Int? = nil, trace : Int? = nil, subscribers : Int? = nil,
