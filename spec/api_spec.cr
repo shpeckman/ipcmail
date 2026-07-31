@@ -55,10 +55,16 @@ describe IPCMail do
   it "listens and connects over a uri" do
     path = SpecSupport.temp_path("uri_sock")
     IPCMail.listen("unix://#{path}") do |server|
-      spawn { IPCMail.open("unix://#{path}").send("uri socket") }
+      clients = Channel(IPCMail::Mailbox).new(1)
+      spawn do
+        client = IPCMail.open("unix://#{path}")
+        client.send("uri socket")
+        clients.send(client)
+      end
       connection = server.accept(5.seconds)
       connection.receive(5.seconds).text.should eq("uri socket")
       connection.close
+      clients.receive.close
     end
   end
 

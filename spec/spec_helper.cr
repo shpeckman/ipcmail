@@ -4,10 +4,15 @@ require "../src/ipcmail"
 
 lib LibSpec
   fun _exit(status : LibC::Int) : NoReturn
+  fun pthread_self : LibC::ULong
 end
 
 module SpecSupport
   extend self
+
+  def thread_id : UInt64
+    LibSpec.pthread_self.to_u64
+  end
 
   def unique(prefix : String) : String
     "/ipcmail_#{prefix}_#{Process.pid}_#{Random.rand(0xffffff).to_s(16)}"

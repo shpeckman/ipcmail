@@ -94,14 +94,17 @@ describe IPCMail::SharedMemory do
   it "waits for a free block when the overflow policy blocks" do
     with_pair(blocks: 1, capacity: 4, overflow: IPCMail::Overflow::Block) do |creator, peer|
       creator.send("first")
+      drained = Channel(Nil).new(1)
 
       spawn do
         sleep 60.milliseconds
         peer.receive(2.seconds)
+        drained.send(nil)
       end
 
       creator.send("second", timeout: 2.seconds)
       peer.receive(2.seconds).text.should eq("second")
+      drained.receive
     end
   end
 
@@ -121,13 +124,16 @@ describe IPCMail::SharedMemory do
     with_pair(capacity: 3, blocks: 8) do |creator, peer|
       creator.send("a")
       creator.send("b")
+      drained = Channel(Nil).new(1)
 
       spawn do
         sleep 60.milliseconds
         peer.receive(2.seconds)
+        drained.send(nil)
       end
 
       creator.send("c", timeout: 2.seconds)
+      drained.receive
       peer.receive(2.seconds)
       peer.receive(2.seconds).text.should eq("c")
     end
@@ -158,22 +164,20 @@ describe IPCMail::SharedMemory do
   end
 
   it "keeps two fibers streaming through the same segment" do
-    with_pair(capacity: 4, blocks: 4) do |creator, peer|
+    with_pair(capacity: 4, blocks: 4, overflow: IPCMail::Overflow::Block) do |creator, peer|
       total = 64
-      received = [] of String
+      received = Channel(String).new(total)
 
-      consumer = spawn do
-        total.times { received << peer.receive(5.seconds).text }
+      spawn do
+        total.times { received.send(peer.receive(5.seconds).text) }
       end
 
       total.times { |index| creator.send("m#{index}", timeout: 5.seconds) }
-      while received.size < total
-        sleep 1.millisecond
-      end
+      messages = Array(String).new(total) { received.receive }
 
-      received.size.should eq(total)
-      received.first.should eq("m0")
-      received.last.should eq("m#{total - 1}")
+      messages.size.should eq(total)
+      messages.first.should eq("m0")
+      messages.last.should eq("m#{total - 1}")
     end
   end
 
@@ -182,29 +186,32 @@ describe IPCMail::SharedMemory do
       senders = 4
       each = 16
       total = senders * each
-      received = 0
+      received = Channel(String).new(total)
+      finished = Channel(Nil).new(senders + 2)
 
       senders.times do |sender|
         spawn do
           each.times { |index| creator.send("s#{sender}-#{index}", timeout: 10.seconds) }
+          finished.send(nil)
         end
       end
 
       2.times do
         spawn do
           loop do
-            break unless peer.receive?(10.seconds)
-            received += 1
+            message = peer.receive?(500.milliseconds)
+            break unless message
+            received.send(message.text)
           end
+          finished.send(nil)
         end
       end
 
-      deadline = Time.instant + 20.seconds
-      while received < total && Time.instant < deadline
-        sleep 1.millisecond
-      end
+      messages = Array(String).new(total) { received.receive }
+      (senders + 2).times { finished.receive }
 
-      received.should eq(total)
+      messages.size.should eq(total)
+      messages.uniq.size.should eq(total)
       creator.segment.blocks_in_use.should eq(0_u32)
     end
   end

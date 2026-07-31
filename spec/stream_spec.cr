@@ -5,13 +5,14 @@ describe IPCMail::Socket do
   it "frames typed messages over a unix socket" do
     path = SpecSupport.temp_path("sock")
     server = IPCMail::Socket::Server.listen(path)
-    client = uninitialized IPCMail::Socket
+    clients = Channel(IPCMail::Socket).new(1)
 
     begin
       spawn do
         client = IPCMail::Socket.connect(path)
         client.send("hello", type: 4, priority: :high)
         client.send("world", type: 5)
+        clients.send(client)
       end
 
       connection = server.accept(5.seconds)
@@ -21,8 +22,8 @@ describe IPCMail::Socket do
       first.priority.should eq(IPCMail::Priority::High)
       connection.receive(5.seconds).text.should eq("world")
       connection.close
+      clients.receive.close
     ensure
-      client.close rescue nil
       server.close
     end
   end
@@ -30,23 +31,20 @@ describe IPCMail::Socket do
   it "answers the client on the same connection" do
     path = SpecSupport.temp_path("sock")
     server = IPCMail::Socket::Server.listen(path)
-    answer = nil
+    answers = Channel(String).new(1)
 
     begin
       spawn do
         client = IPCMail::Socket.connect(path)
         client.send("question")
-        answer = client.receive(5.seconds).text
+        answers.send(client.receive(5.seconds).text)
         client.close
       end
 
       connection = server.accept(5.seconds)
       connection.receive(5.seconds).text.should eq("question")
       connection.send("answer")
-      while answer.nil?
-        sleep 1.millisecond
-      end
-      answer.should eq("answer")
+      answers.receive.should eq("answer")
       connection.close
     ensure
       server.close
@@ -58,12 +56,18 @@ describe IPCMail::Socket do
     server = IPCMail::Socket::Server.listen(path, authenticate: true)
 
     begin
-      spawn { IPCMail::Socket.connect(path).send("who am i") }
+      clients = Channel(IPCMail::Socket).new(1)
+      spawn do
+        client = IPCMail::Socket.connect(path)
+        client.send("who am i")
+        clients.send(client)
+      end
       connection = server.accept(5.seconds)
       credentials = connection.peer_credentials
       credentials.pid.should eq(Process.pid)
       credentials.uid.should eq(LibC.getuid)
       connection.close
+      clients.receive.close
     ensure
       server.close
     end
@@ -74,14 +78,17 @@ describe IPCMail::Socket do
     server = IPCMail::Socket::Server.listen(path, framed: false)
 
     begin
+      clients = Channel(IPCMail::Socket).new(1)
       spawn do
         client = IPCMail::Socket.connect(path, framed: false)
         client.send("raw bytes")
+        clients.send(client)
       end
 
       connection = server.accept(5.seconds)
       connection.receive(5.seconds).text.should eq("raw bytes")
       connection.close
+      clients.receive.close
     ensure
       server.close
     end
@@ -93,10 +100,12 @@ describe IPCMail::Socket do
 
     begin
       server.accept?(60.milliseconds).should be_nil
-      spawn { IPCMail::Socket.connect(path) }
+      clients = Channel(IPCMail::Socket).new(1)
+      spawn { clients.send(IPCMail::Socket.connect(path)) }
       connection = server.accept(5.seconds)
       connection.receive?(60.milliseconds).should be_nil
       connection.close
+      clients.receive.close
     ensure
       server.close
     end
@@ -107,9 +116,14 @@ describe IPCMail::Socket do
     server = IPCMail::Socket::Server.listen(path)
 
     begin
-      spawn { IPCMail::Socket.connect(path).close }
+      closed = Channel(Nil).new(1)
+      spawn do
+        IPCMail::Socket.connect(path).close
+        closed.send(nil)
+      end
       connection = server.accept(5.seconds)
       expect_raises(IPCMail::ClosedError) { connection.receive(5.seconds) }
+      closed.receive
       connection.close
     ensure
       server.close

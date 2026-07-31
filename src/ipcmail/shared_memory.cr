@@ -167,7 +167,8 @@ module IPCMail
 
         case @overflow
         in .fail?
-          raise FullError.new("every block of #{@segment.name} is in use")
+          raise FullError.new("every block of #{@segment.name} is in use, " \
+                              "the overflow policy is :fail so the send deadline is not awaited")
         in .spill?
           return nil
         in .block?
