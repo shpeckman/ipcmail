@@ -3,7 +3,7 @@ CRYSTAL = crystal
 FLAGS = --release --no-debug
 
 BUILD = build
-EXAMPLES = basic bus timeout multiplex
+EXAMPLES = basic bus timeout multiplex buffer
 EXAMPLE_BINS = $(addprefix $(BUILD)/,$(EXAMPLES))
 CLI_BIN = $(BUILD)/ipcmail
 TARGETS = $(EXAMPLE_BINS) $(CLI_BIN)

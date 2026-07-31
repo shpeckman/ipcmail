@@ -1,5 +1,5 @@
 name: ipcmail
-version: 0.2.0
+version: 0.3.0
 description: |
   Zero copy shared memory, pub/sub bus, unix socket and pipe mailboxes for Crystal, wired into the Crystal event loop.
 

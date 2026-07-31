@@ -7,7 +7,7 @@ module IPCMail
     getter errno : Errno
 
     def initialize(context : String, @errno : Errno = Errno.value)
-      super("#{context}: #{@errno}")
+      super("#{context}: #{@errno.message} (#{@errno})")
     end
   end
 

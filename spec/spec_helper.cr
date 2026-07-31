@@ -38,6 +38,13 @@ module SpecSupport
       message = bus.receive(5.seconds)
       bus.publish("ack:#{message.text}", type: 200)
       bus.close
+    when "buffer"
+      mailbox = IPCMail::SharedMemory.open(target, timeout: 10.seconds)
+      message = mailbox.receive(5.seconds)
+      IPCMail::Buffer.open(message.text, read_only: true) do |buffer|
+        mailbox.send(buffer.to_slice.sum(&.to_u64).to_s, type: 2)
+      end
+      mailbox.close
     when "hoard"
       mailbox = IPCMail::SharedMemory.open(target, timeout: 10.seconds)
       mailbox.send(4) { |slice| slice.copy_from("halt".to_slice); LibSpec._exit(0) }
