@@ -121,6 +121,44 @@ describe IPCMail::Bus do
     end
   end
 
+  it "fails fast when publishing without a deadline and no block is free" do
+    with_bus(blocks: 1) do |publisher, name|
+      subscriber = IPCMail::Bus.open(name, timeout: 2.seconds)
+      subscriber.subscribe
+
+      begin
+        publisher.publish("first").should eq(1)
+        expect_raises(IPCMail::FullError, /pass a timeout/) { publisher.publish("second") }
+      ensure
+        subscriber.close
+      end
+    end
+  end
+
+  it "waits for a free block when publishing with a deadline" do
+    with_bus(blocks: 1) do |publisher, name|
+      subscriber = IPCMail::Bus.open(name, timeout: 2.seconds)
+      subscriber.subscribe
+
+      begin
+        publisher.publish("first").should eq(1)
+        released = Channel(Nil).new(1)
+
+        spawn do
+          sleep 60.milliseconds
+          subscriber.receive(2.seconds)
+          released.send(nil)
+        end
+
+        publisher.publish("second", timeout: 2.seconds).should eq(1)
+        released.receive
+        subscriber.receive(2.seconds).text.should eq("second")
+      ensure
+        subscriber.close
+      end
+    end
+  end
+
   it "rejects more type filters than the segment can hold" do
     with_bus do |publisher, name|
       expect_raises(ArgumentError) { publisher.subscribe((1..9).to_a) }

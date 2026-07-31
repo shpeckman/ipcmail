@@ -87,7 +87,43 @@ describe IPCMail::SharedMemory do
     with_pair(blocks: 2, capacity: 8) do |creator, peer|
       creator.send("one")
       creator.send("two")
-      expect_raises(IPCMail::FullError) { creator.send("three") }
+      expect_raises(IPCMail::FullError, /pass a timeout/) { creator.send("three") }
+    end
+  end
+
+  it "waits for a free block when a deadline is given even under the fail policy" do
+    with_pair(blocks: 1, capacity: 4) do |creator, peer|
+      creator.send("first")
+      drained = Channel(Nil).new(1)
+
+      spawn do
+        sleep 60.milliseconds
+        peer.receive(2.seconds)
+        drained.send(nil)
+      end
+
+      creator.send("second", timeout: 2.seconds)
+      drained.receive
+      peer.receive(2.seconds).text.should eq("second")
+    end
+  end
+
+  it "reports a timeout rather than fullness once the deadline elapses" do
+    with_pair(blocks: 1, capacity: 4) do |creator, peer|
+      creator.send("first")
+      started = Time.instant
+      expect_raises(IPCMail::TimeoutError) { creator.send("second", timeout: 150.milliseconds) }
+      (Time.instant - started).should be >= 140.milliseconds
+    end
+  end
+
+  it "still spills immediately when a deadline is given" do
+    with_pair(blocks: 1, capacity: 4, overflow: IPCMail::Overflow::Spill) do |creator, peer|
+      creator.send("in band")
+      started = Time.instant
+      creator.send("out of band", type: 7, timeout: 5.seconds)
+      (Time.instant - started).should be < 1.second
+      creator.overflow_receive?(1.second).try(&.text).should eq("out of band")
     end
   end
 

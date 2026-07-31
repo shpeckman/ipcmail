@@ -235,10 +235,12 @@ module IPCMail
         if index = @segment.synchronize { @segment.claim_block }
           return index
         end
-        unless @overflow.block?
+
+        if @overflow.fail? && deadline.infinite?
           raise FullError.new("every block of #{@segment.name} is in use, " \
-                              "the overflow policy is :fail so the publish deadline is not awaited")
+                              "pass a timeout or use the :block overflow policy to wait for one")
         end
+
         raise TimeoutError.new("no free block in #{@segment.name}") if deadline.expired?
         sleep RETRY
       end

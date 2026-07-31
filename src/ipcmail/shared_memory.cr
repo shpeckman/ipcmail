@@ -165,16 +165,15 @@ module IPCMail
           return index
         end
 
-        case @overflow
-        in .fail?
+        return nil if @overflow.spill?
+
+        if @overflow.fail? && deadline.infinite?
           raise FullError.new("every block of #{@segment.name} is in use, " \
-                              "the overflow policy is :fail so the send deadline is not awaited")
-        in .spill?
-          return nil
-        in .block?
-          raise TimeoutError.new("no free block in #{@segment.name}") if deadline.expired?
-          @inbox.wait(deadline.remaining(WAIT_CAP))
+                              "pass a timeout or use the :block overflow policy to wait for one")
         end
+
+        raise TimeoutError.new("no free block in #{@segment.name}") if deadline.expired?
+        @inbox.wait(deadline.remaining(WAIT_CAP))
       end
     end
 

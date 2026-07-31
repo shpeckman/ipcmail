@@ -70,6 +70,10 @@ module IPCMail
       end
     end
 
+    def infinite? : Bool
+      @at.nil?
+    end
+
     def remaining : Time::Span?
       return nil unless at = @at
       span = at - Time.instant
