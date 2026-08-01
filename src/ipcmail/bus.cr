@@ -167,6 +167,14 @@ module IPCMail
       true
     end
 
+    protected def write_in_place(size : Int, type : UInt32, priority : Priority,
+                                 deadline : Deadline, & : Bytes ->) : Bool
+      check_open
+      guard(size)
+      dispatch(size, type, priority, deadline) { |slice| yield slice }
+      true
+    end
+
     protected def read_message(deadline : Deadline) : Message?
       entry = dequeue(deadline)
       return nil unless entry

@@ -70,6 +70,29 @@ module IPCMail
       raise ClosedError.new(error.message || "the peer closed the connection")
     end
 
+    protected def write_in_place(size : Int, type : UInt32, priority : Priority,
+                                 deadline : Deadline, & : Bytes ->) : Bool
+      check_open
+      writer = @writer || raise Error.new("mailbox is receive only")
+      payload = Bytes.new(size)
+      yield payload
+
+      @write_lock.synchronize do
+        write_timeout(writer, deadline.remaining)
+        if @framed
+          Framing.write(writer, payload, type, priority)
+        else
+          writer.write(payload)
+          writer.flush
+        end
+      end
+      true
+    rescue IO::TimeoutError
+      false
+    rescue error : IO::Error
+      raise ClosedError.new(error.message || "the peer closed the connection")
+    end
+
     protected def read_message(deadline : Deadline) : Message?
       check_open
       reader = @reader || raise Error.new("mailbox is send only")

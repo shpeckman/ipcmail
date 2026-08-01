@@ -6,6 +6,8 @@ module IPCMail
 
     protected abstract def write_message(payload : Bytes, type : UInt32, priority : Priority,
                                          deadline : Deadline) : Bool
+    protected abstract def write_in_place(size : Int, type : UInt32, priority : Priority,
+                                          deadline : Deadline, & : Bytes ->) : Bool
     protected abstract def read_message(deadline : Deadline) : Message?
 
     def send(payload : Bytes, *, type : Int = 0, priority : Priority = :normal,
@@ -22,9 +24,9 @@ module IPCMail
 
     def send(size : Int, *, type : Int = 0, priority : Priority = :normal,
              timeout : Time::Span? = nil, & : Bytes ->) : Nil
-      buffer = Bytes.new(size)
-      yield buffer
-      send(buffer, type: type, priority: priority, timeout: timeout)
+      unless write_in_place(size, type.to_u32, priority, Deadline.new(timeout)) { |slice| yield slice }
+        raise TimeoutError.new("send timed out")
+      end
     end
 
     def send?(payload : Bytes | String, *, type : Int = 0, priority : Priority = :normal,

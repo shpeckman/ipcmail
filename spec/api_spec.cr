@@ -84,7 +84,57 @@ describe IPCMail do
   end
 
   it "refuses to create a listening socket" do
-    expect_raises(ArgumentError, /IPCMail.listen/) { IPCMail.create("unix:///tmp/nope.sock") }
+    expect_raises(IPCMail::SchemeError, /IPCMail.listen/) { IPCMail.create("unix:///tmp/nope.sock") }
+  end
+
+  it "returns concrete types from typed create and open" do
+    name = SpecSupport.unique("typed_bus")
+    IPCMail.create(IPCMail::Bus, "bus://#{name}?subs=4") do |publisher|
+      IPCMail.open(IPCMail::Bus, "bus://#{name}") do |subscriber|
+        subscriber.subscribe(1)
+        publisher.publish("typed", type: 1).should eq(1)
+        subscriber.receive(2.seconds).text.should eq("typed")
+      end
+    end
+  end
+
+  it "guards the typed form against a mismatched scheme" do
+    expect_raises(IPCMail::SchemeError, /expected a bus/) do
+      IPCMail.create(IPCMail::Bus, "shm:///wrong")
+    end
+  end
+
+  it "accepts a direction keyword instead of a query param" do
+    path = SpecSupport.temp_path("kw_fifo")
+    reader = IPCMail.create(IPCMail::Pipe, "fifo://#{path}", direction: :read)
+    writer = IPCMail.open(IPCMail::Pipe, "fifo://#{path}", direction: :write)
+
+    begin
+      writer.send("kw pipe")
+      reader.receive(2.seconds).text.should eq("kw pipe")
+    ensure
+      writer.close
+      reader.close
+      File.delete?(path)
+    end
+  end
+
+  it "fills a stream payload in place" do
+    path = SpecSupport.temp_path("inplace_sock")
+    IPCMail.listen(IPCMail::Socket::Server, "unix://#{path}") do |server|
+      clients = Channel(IPCMail::Mailbox).new(1)
+      spawn do
+        client = IPCMail.open(IPCMail::Socket, "unix://#{path}")
+        client.send(5, type: 7) { |slice| slice.copy_from("hello".to_slice) }
+        clients.send(client)
+      end
+      connection = server.accept(5.seconds)
+      message = connection.receive(5.seconds)
+      message.type.should eq(7)
+      message.text.should eq("hello")
+      connection.close
+      clients.receive.close
+    end
   end
 end
 

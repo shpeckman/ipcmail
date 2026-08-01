@@ -4,6 +4,8 @@ require "../src/ipcmail"
 SEGMENT = "shm:///ipcmail_demo?msgs=16&bsize=512&bcount=32&trace=64"
 SOCKET  = "unix://./ipcmail_demo.sock"
 
+SOCKET_PATH = IPCMail::Address.parse(SOCKET).target
+
 CONTROL = 1
 DATA    = 2
 
@@ -68,9 +70,13 @@ when "shm-child"
 when "socket-child"
   socket_child
 else
-  puts "== shared memory: priorities, gathered writes, zero copy =="
-  shm_parent
-  puts
-  puts "== unix socket: framed types and peer credentials =="
-  socket_parent
+  begin
+    puts "== shared memory: priorities, gathered writes, zero copy =="
+    shm_parent
+    puts
+    puts "== unix socket: framed types and peer credentials =="
+    socket_parent
+  ensure
+    File.delete?(SOCKET_PATH)
+  end
 end

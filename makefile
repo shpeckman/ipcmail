@@ -47,4 +47,5 @@ run: $(TARGETS)
 	@$(MAKE) clean
 
 clean:
-	rm -rf $(BUILD) ipcmail_demo.sock ipcmail_multiplex.sock
+	rm -rf $(BUILD)
+	rm -f *.sock

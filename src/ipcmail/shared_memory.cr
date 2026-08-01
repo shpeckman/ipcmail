@@ -62,12 +62,11 @@ module IPCMail
       @segment.depth(@transmit_lane) + @segment.depth(@transmit_lane + 1)
     end
 
-    def send(size : Int, *, type : Int = 0, priority : Priority = :normal,
-             timeout : Time::Span? = nil, & : Bytes ->) : Nil
+    protected def write_in_place(size : Int, type : UInt32, priority : Priority,
+                                 deadline : Deadline, & : Bytes ->) : Bool
       check_open
       guard(size)
-      delivered = transmit(size, type.to_u32, priority, Deadline.new(timeout)) { |slice| yield slice }
-      raise TimeoutError.new("send timed out") unless delivered
+      transmit(size, type, priority, deadline) { |slice| yield slice }
     end
 
     def receive(timeout : Time::Span? = nil, & : View -> _)

@@ -32,6 +32,12 @@ module IPCMail
   class MessageTooLarge < Error
   end
 
+  class SchemeError < Error
+  end
+
+  class Unsupported < Error
+  end
+
   class CorruptSegment < Error
   end
 

@@ -23,6 +23,38 @@ require "ipcmail"
 #   ?framed= / ?stream=        length prefixed framing     (default framed)
 #   ?direction= / ?read / ?write   fifo direction (required for fifo)
 #   ?authenticate=             unix peer uid check
+
+# ─── typed entry points (preferred) ──────────────────────────────────────────
+# pass the transport class as the first argument to get the concrete type back,
+# with no cast. the scheme in the uri must match the class or SchemeError is
+# raised up front, before any resource is opened.
+IPCMail.create(IPCMail::Bus, "bus:///events?subs=8") do |bus|
+  # bus : IPCMail::Bus   -> subscribe / publish / trace reachable directly
+  bus.subscribe(100, 200)
+  bus.publish("body", type: 100)
+end
+IPCMail.open(IPCMail::SharedMemory, "shm:///demo") do |shm|
+  # shm : IPCMail::SharedMemory
+end
+server = IPCMail.listen(IPCMail::Socket::Server, "unix://./demo.sock") # : IPCMail::Socket::Server
+server.close
+
+# typed forms: create -> shm / bus / fifo, open -> shm / bus / unix / fifo
+IPCMail.create(IPCMail::SharedMemory, "shm:///demo") { |shm| }  # shm : IPCMail::SharedMemory
+IPCMail.create(IPCMail::Pipe, "fifo:///tmp/p", direction: :write) { |pipe| }
+IPCMail.open(IPCMail::Bus, "bus:///events") { |bus| }           # bus : IPCMail::Bus
+IPCMail.open(IPCMail::Socket, "unix://./demo.sock") { |sock| }  # sock : IPCMail::Socket
+IPCMail.open(IPCMail::Pipe, "fifo:///tmp/p", direction: :read) { |pipe| }
+
+# a mismatched scheme fails fast (no cast blowing up later)
+begin
+  IPCMail.create(IPCMail::Bus, "shm:///demo")   # raises IPCMail::SchemeError
+rescue ex : IPCMail::SchemeError
+end
+
+# ─── untyped entry points (polymorphic) ──────────────────────────────────────
+# omit the class to hold any transport as IPCMail::Mailbox. use this when the
+# scheme is dynamic or you multiplex several transports through one code path.
 # create : shm / bus / fifo. returns IPCMail::Mailbox
 mailbox = IPCMail.create("shm:///demo?msgs=16&bsize=512&trace=64",
   capacity: 16, block_size: 512, blocks: 32, trace: 64,
@@ -51,13 +83,20 @@ IPCMail.listen("unix://./demo.sock") { |srv| } # srv : IPCMail::Socket::Server
 monitor = IPCMail.monitor("shm:///demo", timeout: 5.seconds) # : IPCMail::Monitor
 monitor.close
 
+# keyword overrides win over uri query params. every option also has a query
+# form; keywords are handy when a value is required or computed:
+IPCMail.create("fifo:///tmp/p", direction: :read)   { |pipe| }  # instead of ?direction=read
+IPCMail.open("fifo:///tmp/p?direction=write")       { |pipe| }  # query form still works
+
 # ─── IPCMail::Mailbox (shared by every transport) ────────────────────────────
 IPCMail.open("shm:///demo") do |mailbox|
   # send bytes or a string
   mailbox.send("payload", type: 2, priority: :high, timeout: 5.seconds)      # : Nil
   mailbox.send("payload".to_slice, type: 2, priority: :normal)               # : Nil
 
-  # zero copy send: fill the block in place, nothing is copied
+  # in place send: fill the payload where it lives, no intermediate copy.
+  # shm / bus fill the ring block directly; socket / pipe fill one framed
+  # buffer. the transport picks the cheapest path available to it.
   mailbox.send(11, type: 2, priority: :normal, timeout: 5.seconds) do |slice|
     # slice : Bytes  (exactly the size you asked for)
     slice.copy_from("hello world".to_slice)
@@ -111,8 +150,7 @@ IPCMail.open("shm:///demo") do |mailbox|
 end
 
 # ─── IPCMail::SharedMemory (shm://) ──────────────────────────────────────────
-IPCMail.create("shm:///demo?trace=64") do |mailbox|
-  shm = mailbox.as(IPCMail::SharedMemory)
+IPCMail.create(IPCMail::SharedMemory, "shm:///demo?trace=64") do |shm|
   # shm.segment     : IPCMail::Segment
   # shm.overflow    : IPCMail::Overflow
   # shm.block_size  : UInt32
@@ -129,8 +167,7 @@ IPCMail.create("shm:///demo?trace=64") do |mailbox|
 end
 
 # ─── IPCMail::Bus (bus://) ───────────────────────────────────────────────────
-IPCMail.create("bus:///events?subs=8&trace=128") do |mailbox|
-  bus = mailbox.as(IPCMail::Bus)
+IPCMail.create(IPCMail::Bus, "bus:///events?subs=8&trace=128") do |bus|
   # bus.segment    : IPCMail::Segment
   # bus.overflow   : IPCMail::Overflow
   # bus.block_size : UInt32
@@ -148,7 +185,7 @@ IPCMail.create("bus:///events?subs=8&trace=128") do |mailbox|
   # publish : fans out to interested subscribers, returns how many received it
   bus.publish("body", type: 100, priority: :high, timeout: 5.seconds)        # : Int32
   bus.publish("body".to_slice, type: 100, priority: :normal)                 # : Int32
-  bus.publish(4, type: 100) do |slice|              # zero copy publish
+  bus.publish(4, type: 100) do |slice|              # in place publish
     # slice : Bytes
   end                                               # : Int32
 
@@ -161,7 +198,7 @@ IPCMail.create("bus:///events?subs=8&trace=128") do |mailbox|
 end
 
 # ─── IPCMail::Socket (unix://) ───────────────────────────────────────────────
-IPCMail.listen("unix://./demo.sock", authenticate: true) do |server|
+IPCMail.listen(IPCMail::Socket::Server, "unix://./demo.sock", authenticate: true) do |server|
   # server : IPCMail::Socket::Server
   # server.path    : String
   # server.framed? : Bool
@@ -187,15 +224,14 @@ IPCMail.listen("unix://./demo.sock", authenticate: true) do |server|
   connection.close
 end
 
-# client side of a socket
-IPCMail.open("unix://./demo.sock") do |client|
-  client = client.as(IPCMail::Socket)
+# client side of a socket (typed open gives you IPCMail::Socket directly)
+IPCMail.open(IPCMail::Socket, "unix://./demo.sock") do |client|
   client.send("hello", type: 1)                     # : Nil
+  # client.peer_credentials : IPCMail::Credentials
 end
 
 # ─── IPCMail::Stream shared surface (Socket and Pipe) ────────────────────────
-IPCMail.open("unix://./demo.sock") do |stream|
-  stream = stream.as(IPCMail::Stream)
+IPCMail.open(IPCMail::Socket, "unix://./demo.sock") do |stream|
   # stream.framed?   : Bool
   # stream.readable? : Bool
   # stream.writable? : Bool
@@ -205,20 +241,20 @@ end
 
 # ─── IPCMail::Pipe (fifo://) ─────────────────────────────────────────────────
 # fifo endpoints need a direction. open one end, the peer opens the other.
-reader = IPCMail.open("fifo:///tmp/demo.fifo?direction=read")   # : IPCMail::Mailbox
-writer = IPCMail.open("fifo:///tmp/demo.fifo?direction=write")  # : IPCMail::Mailbox
+reader = IPCMail.open(IPCMail::Pipe, "fifo:///tmp/demo.fifo", direction: :read)   # : IPCMail::Pipe
+writer = IPCMail.open(IPCMail::Pipe, "fifo:///tmp/demo.fifo", direction: :write)  # : IPCMail::Pipe
+# reader.path : String?
+reader.unlink                                                  # : Nil  (remove the fifo file)
 reader.close
 writer.close
 
-# direct construction of a fifo pair of endpoints
+# direct construction of a fifo endpoint
 read_end = IPCMail::Pipe.fifo("/tmp/demo.fifo", IPCMail::Pipe::Direction::Read,
   framed: true, timeout: 5.seconds, mode: 0o600)                # : IPCMail::Pipe
-# read_end.path : String?
-read_end.unlink                                                 # : Nil  (remove the fifo file)
 read_end.close
 
 # an in process anonymous pipe pair (two connected endpoints, no filesystem)
-left, right = IPCMail::Pipe.pair(framed: true)                  # : Tuple(IPCMail::Pipe, IPCMail::Pipe)
+left, right = IPCMail::Pipe.pair(framed: true)                 # : Tuple(IPCMail::Pipe, IPCMail::Pipe)
 left.send("ping", type: 1)
 right.receive(1.second)
 left.close
@@ -307,6 +343,7 @@ IPCMail::Bus.create("/events", config)                 # : IPCMail::Bus
 # IPCMail::Kind : UInt32      -> PointToPoint (0) | Bus (1)
 # IPCMail::Lane : UInt8       -> A (0) | B (1)
 # IPCMail::Event : UInt8      -> Send (0) | Receive (1)
+# IPCMail::Pipe::Direction    -> Read | Write
 
 # ─── errors (all descend from IPCMail::Error < Exception) ────────────────────
 begin
@@ -315,6 +352,8 @@ rescue ex : IPCMail::TimeoutError    # deadline elapsed
 rescue ex : IPCMail::ClosedError     # endpoint / peer closed
 rescue ex : IPCMail::FullError       # every block in use (overflow: :fail)
 rescue ex : IPCMail::MessageTooLarge # payload exceeds the block size
+rescue ex : IPCMail::SchemeError     # uri scheme unsupported or wrong for the verb / type
+rescue ex : IPCMail::Unsupported     # operation not supported by this transport
 rescue ex : IPCMail::CorruptSegment  # segment layout mismatch
 rescue ex : IPCMail::PermissionDenied # peer failed uid authentication
 rescue ex : IPCMail::SystemError     # ex.errno : Errno  (syscall failure)

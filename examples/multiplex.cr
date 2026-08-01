@@ -5,6 +5,8 @@ SEGMENT = "shm:///ipcmail_multiplex?msgs=32&bsize=256&bcount=64"
 BUS     = "bus:///ipcmail_multiplex_bus?msgs=16&bsize=256&bcount=32"
 SOCKET  = "unix://./ipcmail_multiplex.sock"
 
+SOCKET_PATH = IPCMail::Address.parse(SOCKET).target
+
 record Envelope, source : String, message : IPCMail::Message
 
 def pump(source : String, mailbox : IPCMail::Mailbox, channel : Channel(Envelope))
@@ -20,13 +22,13 @@ end
 
 def client
   IPCMail.open("shm:///ipcmail_multiplex") do |shm|
-    IPCMail.open("bus:///ipcmail_multiplex_bus") do |bus|
+    IPCMail.open(IPCMail::Bus, "bus:///ipcmail_multiplex_bus") do |bus|
       IPCMail.open(SOCKET) do |socket|
         sleep 50.milliseconds
         shm.send("shared memory, normal", type: 10)
         socket.send("unix socket, normal", type: 11)
         shm.send("shared memory, high", type: 20, priority: :high)
-        bus.as(IPCMail::Bus).publish("bus broadcast", type: 30, priority: :high)
+        bus.publish("bus broadcast", type: 30, priority: :high)
         socket.send("unix socket, high", type: 21, priority: :high)
         sleep 50.milliseconds
       end
@@ -38,8 +40,8 @@ def server
   channel = Channel(Envelope).new(16)
 
   IPCMail.create(SEGMENT) do |shm|
-    IPCMail.create(BUS) do |bus|
-      bus.as(IPCMail::Bus).subscribe
+    IPCMail.create(IPCMail::Bus, BUS) do |bus|
+      bus.subscribe
 
       IPCMail.listen(SOCKET) do |server|
         child = Process.new(PROGRAM_NAME, ["client"], output: :inherit, error: :inherit)
@@ -74,6 +76,10 @@ end
 if ARGV.first? == "client"
   client
 else
-  puts "== multiplexing: one select loop over shm, bus and socket =="
-  server
+  begin
+    puts "== multiplexing: one select loop over shm, bus and socket =="
+    server
+  ensure
+    File.delete?(SOCKET_PATH)
+  end
 end

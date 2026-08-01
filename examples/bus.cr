@@ -8,8 +8,7 @@ METRICS = 200
 ALERTS  = 300
 
 def worker(id : Int32, types : Array(Int32), expected : Int32)
-  IPCMail.open(BUS) do |bus|
-    bus = bus.as(IPCMail::Bus)
+  IPCMail.open(IPCMail::Bus, BUS) do |bus|
     bus.subscribe(types)
 
     expected.times do
@@ -24,9 +23,7 @@ def worker(id : Int32, types : Array(Int32), expected : Int32)
 end
 
 def publisher
-  IPCMail.create("#{BUS}?msgs=16&bsize=256&bcount=64&trace=128") do |mailbox|
-    bus = mailbox.as(IPCMail::Bus)
-
+  IPCMail.create(IPCMail::Bus, "#{BUS}?msgs=16&bsize=256&bcount=64&trace=128") do |bus|
     workers = [
       Process.new(PROGRAM_NAME, ["worker", "1", "#{LOGS},#{METRICS},#{ALERTS}", "3"], output: :inherit, error: :inherit),
       Process.new(PROGRAM_NAME, ["worker", "2", "#{ALERTS}", "1"], output: :inherit, error: :inherit),

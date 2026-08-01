@@ -26,7 +26,51 @@ module IPCMail
   def self.create(uri : String, *, capacity : Int? = nil, block_size : Int? = nil,
                   blocks : Int? = nil, trace : Int? = nil, subscribers : Int? = nil,
                   overflow : Overflow? = nil, mode : Int? = nil, framed : Bool? = nil,
+                  direction : Pipe::Direction? = nil,
                   timeout : Time::Span? = 5.seconds) : Mailbox
+    build(uri, capacity: capacity, block_size: block_size, blocks: blocks, trace: trace,
+      subscribers: subscribers, overflow: overflow, mode: mode, framed: framed,
+      direction: direction, timeout: timeout)
+  end
+
+  def self.create(uri : String, **options, &)
+    mailbox = build(uri, **options)
+    begin
+      yield mailbox
+    ensure
+      mailbox.close
+    end
+  end
+
+  def self.create(kind : SharedMemory.class, uri : String, **options) : SharedMemory
+    expect(uri, "shm", "create")
+    build(uri, **options).as(SharedMemory)
+  end
+
+  def self.create(kind : Bus.class, uri : String, **options) : Bus
+    expect(uri, "bus", "create")
+    build(uri, **options).as(Bus)
+  end
+
+  def self.create(kind : Pipe.class, uri : String, **options) : Pipe
+    expect(uri, "fifo", "create")
+    build(uri, **options).as(Pipe)
+  end
+
+  def self.create(kind : T.class, uri : String, **options, &) forall T
+    mailbox = create(kind, uri, **options)
+    begin
+      yield mailbox
+    ensure
+      mailbox.close
+    end
+  end
+
+  private def self.build(uri : String, *, capacity : Int? = nil, block_size : Int? = nil,
+                         blocks : Int? = nil, trace : Int? = nil, subscribers : Int? = nil,
+                         overflow : Overflow? = nil, mode : Int? = nil, framed : Bool? = nil,
+                         direction : Pipe::Direction | Symbol | Nil = nil,
+                         timeout : Time::Span? = 5.seconds) : Mailbox
     address = Address.parse(uri)
     settings = config(address, capacity, block_size, blocks, trace, subscribers, overflow, mode)
 
@@ -36,15 +80,22 @@ module IPCMail
     when "bus"
       Bus.create(address.target, settings)
     when "fifo"
-      Pipe.fifo(address.target, direction(address), framed: framed?(address, framed),
+      Pipe.fifo(address.target, direction(address, direction), framed: framed?(address, framed),
         timeout: timeout, mode: settings.mode)
     else
-      raise ArgumentError.new("#{address.scheme}:// endpoints are created with IPCMail.listen")
+      raise SchemeError.new("#{address.scheme}:// endpoints are created with IPCMail.listen(#{uri.inspect})")
     end
   end
 
-  def self.create(uri : String, **options, &)
-    mailbox = create(uri, **options)
+  def self.open(uri : String, *, overflow : Overflow? = nil, mode : Int? = nil,
+                framed : Bool? = nil, direction : Pipe::Direction? = nil,
+                timeout : Time::Span? = 5.seconds) : Mailbox
+    attach(uri, overflow: overflow, mode: mode, framed: framed,
+      direction: direction, timeout: timeout)
+  end
+
+  def self.open(uri : String, **options, &)
+    mailbox = attach(uri, **options)
     begin
       yield mailbox
     ensure
@@ -52,8 +103,38 @@ module IPCMail
     end
   end
 
-  def self.open(uri : String, *, overflow : Overflow? = nil, mode : Int? = nil,
-                framed : Bool? = nil, timeout : Time::Span? = 5.seconds) : Mailbox
+  def self.open(kind : SharedMemory.class, uri : String, **options) : SharedMemory
+    expect(uri, "shm", "open")
+    attach(uri, **options).as(SharedMemory)
+  end
+
+  def self.open(kind : Bus.class, uri : String, **options) : Bus
+    expect(uri, "bus", "open")
+    attach(uri, **options).as(Bus)
+  end
+
+  def self.open(kind : Socket.class, uri : String, **options) : Socket
+    expect(uri, "unix", "open")
+    attach(uri, **options).as(Socket)
+  end
+
+  def self.open(kind : Pipe.class, uri : String, **options) : Pipe
+    expect(uri, "fifo", "open")
+    attach(uri, **options).as(Pipe)
+  end
+
+  def self.open(kind : T.class, uri : String, **options, &) forall T
+    mailbox = open(kind, uri, **options)
+    begin
+      yield mailbox
+    ensure
+      mailbox.close
+    end
+  end
+
+  private def self.attach(uri : String, *, overflow : Overflow? = nil, mode : Int? = nil,
+                          framed : Bool? = nil, direction : Pipe::Direction | Symbol | Nil = nil,
+                          timeout : Time::Span? = 5.seconds) : Mailbox
     address = Address.parse(uri)
     policy = overflow || address.overflow? || Overflow::Fail
     permissions = mode || address.mode? || 0o600
@@ -66,41 +147,51 @@ module IPCMail
     when "unix"
       Socket.connect(address.target, framed: framed?(address, framed), timeout: timeout)
     when "fifo"
-      Pipe.fifo(address.target, direction(address), framed: framed?(address, framed),
+      Pipe.fifo(address.target, direction(address, direction), framed: framed?(address, framed),
         timeout: timeout, mode: permissions)
     else
-      raise ArgumentError.new("unsupported scheme #{address.scheme.inspect}")
-    end
-  end
-
-  def self.open(uri : String, **options, &)
-    mailbox = open(uri, **options)
-    begin
-      yield mailbox
-    ensure
-      mailbox.close
+      raise SchemeError.new("unsupported scheme #{address.scheme.inspect}")
     end
   end
 
   def self.listen(uri : String, *, framed : Bool? = nil, authenticate : Bool? = nil,
                   backlog : Int = ::Socket::SOMAXCONN, mode : Int? = nil) : Socket::Server
-    address = Address.parse(uri)
-    unless address.scheme == "unix"
-      raise ArgumentError.new("#{address.scheme}:// endpoints do not listen, use IPCMail.create")
-    end
-
-    Socket::Server.listen(address.target, framed: framed?(address, framed),
-      authenticate: authenticate.nil? ? (address.boolean?("authenticate") || false) : authenticate,
-      backlog: backlog, mode: mode || address.mode? || 0o600)
+    serve(uri, framed: framed, authenticate: authenticate, backlog: backlog, mode: mode)
   end
 
   def self.listen(uri : String, **options, &)
-    server = listen(uri, **options)
+    server = serve(uri, **options)
     begin
       yield server
     ensure
       server.close
     end
+  end
+
+  def self.listen(kind : Socket::Server.class, uri : String, **options) : Socket::Server
+    expect(uri, "unix", "listen")
+    serve(uri, **options)
+  end
+
+  def self.listen(kind : Socket::Server.class, uri : String, **options, &)
+    server = listen(kind, uri, **options)
+    begin
+      yield server
+    ensure
+      server.close
+    end
+  end
+
+  private def self.serve(uri : String, *, framed : Bool? = nil, authenticate : Bool? = nil,
+                         backlog : Int = ::Socket::SOMAXCONN, mode : Int? = nil) : Socket::Server
+    address = Address.parse(uri)
+    unless address.scheme == "unix"
+      raise SchemeError.new("#{address.scheme}:// endpoints do not listen, create them with IPCMail.create(#{uri.inspect})")
+    end
+
+    Socket::Server.listen(address.target, framed: framed?(address, framed),
+      authenticate: authenticate.nil? ? (address.boolean?("authenticate") || false) : authenticate,
+      backlog: backlog, mode: mode || address.mode? || 0o600)
   end
 
   def self.monitor(uri : String, timeout : Time::Span? = 5.seconds) : Monitor
@@ -126,7 +217,15 @@ module IPCMail
     framed.nil? ? true : framed
   end
 
-  private def self.direction(address : Address) : Pipe::Direction
-    address.direction? || raise ArgumentError.new("fifo:// endpoints need ?direction=read or ?direction=write")
+  private def self.direction(address : Address, override : Pipe::Direction | Symbol | Nil) : Pipe::Direction
+    resolved = override.is_a?(Symbol) ? Pipe::Direction.parse(override.to_s) : override
+    resolved || address.direction? ||
+      raise ArgumentError.new("fifo:// endpoints need a direction, pass direction: :read / :write or ?direction=read")
+  end
+
+  private def self.expect(uri : String, scheme : String, verb : String) : Nil
+    actual = Address.parse(uri).scheme
+    return if actual == scheme
+    raise SchemeError.new("IPCMail.#{verb} expected a #{scheme}:// endpoint but got #{actual}://")
   end
 end
