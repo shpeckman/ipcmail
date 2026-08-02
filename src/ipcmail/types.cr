@@ -41,6 +41,7 @@ module IPCMail
       raise ArgumentError.new("capacity must be at least 2") if capacity < 2
       raise ArgumentError.new("block_size must be positive") if block_size < 1
       raise ArgumentError.new("blocks must be positive") if blocks < 1
+      raise ArgumentError.new("subscribers must be at least 1") if subscribers < 1
       raise ArgumentError.new("subscribers must not exceed #{LibIPC::MAX_SUBSCRIBERS}") if subscribers > LibIPC::MAX_SUBSCRIBERS
       @capacity = capacity.to_u32
       @block_size = block_size.to_u32

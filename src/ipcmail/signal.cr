@@ -61,6 +61,12 @@ module IPCMail
   end
 
   class Signal::Sender
+    enum Result
+      Delivered
+      NoReader
+      Failed
+    end
+
     getter path : String
 
     def initialize(@path : String)
@@ -69,18 +75,19 @@ module IPCMail
     end
 
     def notify : Bool
-      return false if @closed
-      return false unless connect
-      byte = 1_u8
-      count = LibC.write(@fd, pointerof(byte).as(Void*), LibC::SizeT.new(1))
-      return true if count == 1
+      deliver == Result::Delivered
+    end
 
-      errno = Errno.value
-      if errno.epipe? || errno.ebadf?
-        LibC.close(@fd)
-        @fd = -1
-      end
-      false
+    def deliver : Result
+      return Result::Failed if @closed
+      opened = connect
+      return Result::NoReader if opened == Result::NoReader
+      return Result::Failed if opened == Result::Failed
+
+      result = attempt
+      return result unless result == Result::Failed
+      return Result::Failed unless reopen == Result::Delivered
+      attempt
     end
 
     def close : Nil
@@ -90,12 +97,35 @@ module IPCMail
       @fd = -1
     end
 
-    private def connect : Bool
-      return true if @fd >= 0
+    private def attempt : Result
+      byte = 1_u8
+      count = LibC.write(@fd, pointerof(byte).as(Void*), LibC::SizeT.new(1))
+      return Result::Delivered if count == 1
+
+      errno = Errno.value
+      return Result::NoReader if errno.eagain?
+      if errno.epipe? || errno.ebadf?
+        LibC.close(@fd)
+        @fd = -1
+        return Result::Failed
+      end
+      Result::Failed
+    end
+
+    private def connect : Result
+      return Result::Delivered if @fd >= 0
       fd = LibC.open(@path, LibC::O_WRONLY | LibC::O_NONBLOCK | LibC::O_CLOEXEC, 0o600_u32)
-      return false if fd < 0
+      if fd < 0
+        return Errno.value.enxio? ? Result::NoReader : Result::Failed
+      end
       @fd = fd
-      true
+      Result::Delivered
+    end
+
+    private def reopen : Result
+      LibC.close(@fd) if @fd >= 0
+      @fd = -1
+      connect
     end
   end
 end

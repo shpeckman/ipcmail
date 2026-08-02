@@ -71,6 +71,11 @@ module IPCMail
 
     def receive(timeout : Time::Span? = nil, & : View -> _)
       check_open
+      if message = drain_spill
+        yield View.new(message.payload, message.type, message.priority)
+        return
+      end
+
       entry = dequeue(Deadline.new(timeout))
       raise TimeoutError.new("receive timed out") unless entry
       descriptor, priority = entry
@@ -122,6 +127,10 @@ module IPCMail
 
     protected def read_message(deadline : Deadline) : Message?
       check_open
+      if message = drain_spill
+        return message
+      end
+
       entry = dequeue(deadline)
       return nil unless entry
       descriptor, priority = entry
@@ -154,6 +163,7 @@ module IPCMail
         raise error
       end
 
+      @segment.publish_barrier
       enqueue(index, size.to_u32, type, priority, deadline)
     end
 
@@ -243,6 +253,17 @@ module IPCMail
 
     private def receive_lane : Lane
       @receive_lane == 0 ? Lane::A : Lane::B
+    end
+
+    private def drain_spill : Message?
+      return nil unless @overflow.spill?
+      io = spill_io
+      io.read_timeout = Time::Span.zero
+      Framing.read(io, SPILL_LIMIT)
+    rescue IO::TimeoutError
+      nil
+    rescue IO::EOFError
+      nil
     end
 
     private def spill(payload : Bytes, type : UInt32, priority : Priority, deadline : Deadline) : Bool

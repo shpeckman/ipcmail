@@ -199,6 +199,7 @@ module IPCMail
         raise error
       end
 
+      @segment.publish_barrier
       descriptor = LibIPC::Descriptor.new(block: index, size: size.to_u32, type: type)
 
       loop do
@@ -220,6 +221,7 @@ module IPCMail
           else
             if matched.empty?
               @segment.discard_block(index)
+              @segment.trace(type, size.to_u32, priority, Lane::A, :send)
             else
               @segment.reference_block(index, matched.size.to_u32)
               matched.each { |slot| @segment.push_subscriber(slot, priority, descriptor) }

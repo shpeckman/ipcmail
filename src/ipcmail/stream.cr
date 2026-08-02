@@ -15,6 +15,7 @@ module IPCMail
       @read_lock = Sync::Mutex.new
       @write_lock = Sync::Mutex.new
       @header = Bytes.new(Framing::HEADER_SIZE)
+      @consumed = false
       @closed = false
     end
 
@@ -117,18 +118,9 @@ module IPCMail
     end
 
     private def read_frame(reader : IO, deadline : Deadline) : Message?
-      filled = 0
+      @consumed = false
 
-      while filled < @header.size
-        read_timeout(reader, filled == 0 ? deadline.remaining : nil)
-        begin
-          count = reader.read(@header + filled)
-        rescue IO::TimeoutError
-          return nil
-        end
-        raise IO::EOFError.new if count == 0
-        filled += count
-      end
+      return nil unless fill(reader, @header, deadline, allow_empty: true)
 
       size = Framing::FORMAT.decode(UInt32, @header[0, 4])
       type = Framing::FORMAT.decode(UInt32, @header[4, 4])
@@ -136,11 +128,26 @@ module IPCMail
       raise MessageTooLarge.new("frame of #{size} bytes exceeds #{@limit}") if size > @limit
 
       payload = Bytes.new(size)
-      if size > 0
-        read_timeout(reader, nil)
-        reader.read_fully(payload)
-      end
+      fill(reader, payload, deadline, allow_empty: false) if size > 0
       Message.new(payload, type, Priority.from_value(priority.to_u8))
+    rescue IO::TimeoutError
+      raise ClosedError.new("the peer stalled mid-frame") if @consumed
+      nil
+    end
+
+    private def fill(reader : IO, buffer : Bytes, deadline : Deadline, allow_empty : Bool) : Bool
+      filled = 0
+      while filled < buffer.size
+        read_timeout(reader, deadline.remaining)
+        count = reader.read(buffer + filled)
+        if count == 0
+          raise IO::EOFError.new unless filled == 0 && allow_empty && !@consumed
+          return false
+        end
+        @consumed = true
+        filled += count
+      end
+      true
     end
 
     private def read_timeout(io : IO, span : Time::Span?) : Nil

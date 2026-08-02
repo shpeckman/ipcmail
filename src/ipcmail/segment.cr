@@ -72,8 +72,15 @@ class IPCMail::Segment
     ready = (base + offsetof(LibIPC::Header, @ready)).as(Atomic(UInt32)*)
 
     until ready.value.get(:acquire) == 1
+      magic = header.value.magic
+      if magic != 0 && magic != MAGIC
+        munmap(base, size)
+        LibC.close(fd)
+        raise CorruptSegment.new("#{name} is not an ipcmail segment")
+      end
+
       if deadline.expired?
-        LibC.munmap(base.as(Void*), LibC::SizeT.new(size))
+        munmap(base, size)
         LibC.close(fd)
         raise TimeoutError.new("segment #{name} is not initialized")
       end
@@ -81,11 +88,29 @@ class IPCMail::Segment
     end
 
     layout = Layout.from(header.value)
-    valid = header.value.magic == MAGIC && header.value.version == VERSION &&
-            header.value.kind == kind.value && layout.bytes == size
 
-    unless valid
-      LibC.munmap(base.as(Void*), LibC::SizeT.new(size))
+    unless header.value.magic == MAGIC
+      munmap(base, size)
+      LibC.close(fd)
+      raise CorruptSegment.new("#{name} is not an ipcmail segment")
+    end
+
+    if header.value.version != VERSION
+      version = header.value.version
+      munmap(base, size)
+      LibC.close(fd)
+      raise CorruptSegment.new("segment #{name} is version #{version}, expected #{VERSION}")
+    end
+
+    if header.value.kind != kind.value
+      actual = Kind.from_value?(header.value.kind)
+      munmap(base, size)
+      LibC.close(fd)
+      raise SchemeError.new("segment #{name} is a #{actual || "unknown"} segment, not #{kind}")
+    end
+
+    unless layout.bytes == size
+      munmap(base, size)
       LibC.close(fd)
       raise CorruptSegment.new("segment #{name} does not match the expected layout")
     end
@@ -100,6 +125,10 @@ class IPCMail::Segment
       LibC::PROT_READ | LibC::PROT_WRITE, LibC::MAP_SHARED, fd, LibC::OffT.new(0))
     raise SystemError.new("mmap") if address == LibC::MAP_FAILED
     address.as(UInt8*)
+  end
+
+  private def self.munmap(base : Pointer(UInt8), size : Int64) : Nil
+    LibC.munmap(base.as(Void*), LibC::SizeT.new(size))
   end
 
   private def initialize(@name : String, @fd : Int32, @base : Pointer(UInt8),
@@ -280,6 +309,10 @@ class IPCMail::Segment
       index += 1
     end
     nil
+  end
+
+  def publish_barrier : Nil
+    Atomic.fence(:release)
   end
 
   def discard_block(index : UInt32) : Nil
