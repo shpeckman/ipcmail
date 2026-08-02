@@ -1,7 +1,7 @@
 # src/ipcmail/segment.cr
 class IPCMail::Segment
   MAGIC        = 0x49504d42_u32
-  VERSION      =          4_u32
+  VERSION      =          5_u32
   STALL        = 250.milliseconds
   SPIN_LIMIT   = 64
   BACKOFF      = 200.microseconds
@@ -116,6 +116,7 @@ class IPCMail::Segment
     end
 
     segment = new(name, fd, base, layout, kind, false)
+    segment.attach_flag.value.add(1_u32, :acquire_release)
     segment.sweep
     segment
   end
@@ -149,6 +150,7 @@ class IPCMail::Segment
     @header.value.block_count = @layout.block_count
     @header.value.trace_capacity = @layout.trace_capacity
     @header.value.max_subscribers = @layout.max_subscribers
+    attach_flag.value.set(1_u32, :relaxed)
     Atomic.fence
     ready_flag.value.set(1_u32, :release)
   end
@@ -198,13 +200,13 @@ class IPCMail::Segment
   end
 
   def unlock : Nil
-    @header.value.owner = 0_u32
+    owner_flag.value.set(0_u32, :release)
     LibIPC.sem_post(lock_semaphore)
   end
 
   private def try_lock : Bool
     return false unless LibIPC.sem_trywait(lock_semaphore) == 0
-    @header.value.owner = Process.pid.to_u32
+    owner_flag.value.set(Process.pid.to_u32, :release)
     if @header.value.damaged != 0
       @header.value.damaged = 0_u32
       recover
@@ -215,10 +217,11 @@ class IPCMail::Segment
   private def steal_from_dead_owner : Nil
     return unless LibIPC.sem_trywait(recovery_semaphore) == 0
     begin
-      owner = @header.value.owner
+      owner = owner_flag.value.get(:acquire)
       return if owner == 0
       return if Process.exists?(owner.to_i32)
-      @header.value.owner = 0_u32
+      _, stolen = owner_flag.value.compare_and_set(owner, 0_u32)
+      return unless stolen
       @header.value.damaged = 1_u32
       LibIPC.sem_post(lock_semaphore)
     ensure
@@ -484,12 +487,14 @@ class IPCMail::Segment
     {records, cursor}
   end
 
-  def close : Nil
-    return if @closed
+  def close : Bool
+    return false if @closed
     @closed = true
+    last = attach_flag.value.sub(1_u32, :acquire_release) <= 1
     LibC.munmap(@base.as(Void*), LibC::SizeT.new(@layout.bytes))
     LibC.close(@fd)
-    LibIPC.shm_unlink(@name) if @creator
+    LibIPC.shm_unlink(@name) if last
+    last
   end
 
   private def lock_semaphore : Void*
@@ -502,6 +507,14 @@ class IPCMail::Segment
 
   private def ready_flag : Pointer(Atomic(UInt32))
     (@base + offsetof(LibIPC::Header, @ready)).as(Atomic(UInt32)*)
+  end
+
+  private def owner_flag : Pointer(Atomic(UInt32))
+    (@base + offsetof(LibIPC::Header, @owner)).as(Atomic(UInt32)*)
+  end
+
+  protected def attach_flag : Pointer(Atomic(UInt32))
+    (@base + offsetof(LibIPC::Header, @attach_count)).as(Atomic(UInt32)*)
   end
 
   private def queue_pointer : Pointer(LibIPC::Queue)

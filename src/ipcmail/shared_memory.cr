@@ -106,12 +106,12 @@ module IPCMail
       @inbox.close
       @outbox.close
       @spill.try &.close
-      if @segment.creator?
-        @inbox.unlink
+      last = @segment.close
+      if last
+        File.delete?(Signal.path_for(@segment.name, "a"))
         File.delete?(Signal.path_for(@segment.name, "b"))
         File.delete?(Signal.path_for(@segment.name, "overflow"))
       end
-      @segment.close
     end
 
     def finalize

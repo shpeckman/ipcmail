@@ -50,6 +50,7 @@ lib LibIPC
     ready : UInt32
     owner : UInt32
     damaged : UInt32
+    attach_count : UInt32
     capacity : UInt32
     block_size : UInt32
     block_count : UInt32

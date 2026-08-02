@@ -122,14 +122,10 @@ module IPCMail
 
       return nil unless fill(reader, @header, deadline, allow_empty: true)
 
-      size = Framing::FORMAT.decode(UInt32, @header[0, 4])
-      type = Framing::FORMAT.decode(UInt32, @header[4, 4])
-      priority = Framing::FORMAT.decode(UInt32, @header[8, 4])
-      raise MessageTooLarge.new("frame of #{size} bytes exceeds #{@limit}") if size > @limit
-
-      payload = Bytes.new(size)
-      fill(reader, payload, deadline, allow_empty: false) if size > 0
-      Message.new(payload, type, Priority.from_value(priority.to_u8))
+      head = Framing.decode(@header, @limit)
+      payload = Bytes.new(head.size)
+      fill(reader, payload, deadline, allow_empty: false) if head.size > 0
+      Message.new(payload, head.type, head.priority)
     rescue IO::TimeoutError
       raise ClosedError.new("the peer stalled mid-frame") if @consumed
       nil

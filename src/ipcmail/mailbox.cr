@@ -32,7 +32,7 @@ abstract class IPCMail::Mailbox
             timeout : Time::Span? = nil) : Bool
     send(payload, type: type, priority: priority, timeout: timeout)
     true
-  rescue TimeoutError | FullError
+  rescue TimeoutError | FullError | ClosedError
     false
   end
 
