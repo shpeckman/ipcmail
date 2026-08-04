@@ -478,15 +478,21 @@ A `Makefile` wraps the common tasks:
 make check                 # compile-only check of the library
 make spec                  # full suite, including multi-process crash-recovery tests
 make examples              # build and run every example in examples/
+make bench                 # run every benchmark in bench/ (--release)
 make spec-ec               # execution-context spec under CRYSTAL_WORKERS
 make examples-ec           # execution-context example under CRYSTAL_WORKERS
+make bench-ec              # execution-context benchmark under CRYSTAL_WORKERS
 make run-<name>            # run a single example, e.g. make run-bus
+make bench-<name>          # run a single benchmark, e.g. make bench-shm
 ```
 
-`spec-ec` and `examples-ec` set `CRYSTAL_WORKERS` (default `4`, override with
-`make spec-ec CRYSTAL_WORKERS=8`) so the parallel-context tests and example
-exercise real multi-scheduler delivery. Plain `crystal spec` / `crystal run`
-work too.
+`spec-ec`, `examples-ec`, and `bench-ec` set `CRYSTAL_WORKERS` (default `4`,
+override with `make bench-ec CRYSTAL_WORKERS=8`) so the parallel-context tests,
+example, and benchmark exercise real multi-scheduler delivery. Plain
+`crystal spec` / `crystal run` work too. Benchmarks always compile `--release`;
+they report sustained one-way throughput (msg/s and MiB/s) and round-trip
+latency percentiles (min/mean/p50/p90/p99/max) per transport, plus bus fan-out
+and parallel-consumer scaling.
 
 The spec suite spawns real child processes (via `spec/support/peer.cr`) to
 SIGKILL a lock holder mid-critical-section and assert the segment recovers.
