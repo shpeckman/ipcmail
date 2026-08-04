@@ -50,10 +50,10 @@ describe "IPCMail::Bus across execution contexts" do
     consumer = IPCMail::Bus.open(name, overflow: :block)
     consumer.subscribe
 
-    publishers   = Fiber::ExecutionContext::Parallel.new("publishers", 4)
-    published    = WaitGroup.new(4)
-    per_pub      = 50
-    total        = 4 * per_pub
+    publishers = Fiber::ExecutionContext::Parallel.new("publishers", 4)
+    published  = WaitGroup.new(4)
+    per_pub    = 50
+    total      = 4 * per_pub
 
     begin
       4.times do |p|

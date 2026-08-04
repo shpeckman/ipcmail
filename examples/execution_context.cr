@@ -9,10 +9,10 @@
 require "wait_group"
 require "../src/ipcmail"
 
-name      = "/ipcmail-example-ec-#{Process.pid}"
-workers   = 4
-per_work  = 5
-total     = workers * per_work
+name     = "/ipcmail-example-ec-#{Process.pid}"
+workers  = 4
+per_work = 5
+total    = workers * per_work
 
 publisher = IPCMail.create(IPCMail::Bus, "bus://#{name}?subs=8&capacity=64&blocks=256")
 
