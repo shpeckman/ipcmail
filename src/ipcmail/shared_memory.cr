@@ -71,13 +71,14 @@ module IPCMail
 
     def receive(timeout : Time::Span? = nil, & : View -> _)
       check_open
-      if message = drain_spill
-        yield View.new(message.payload, message.type, message.priority)
+      entry = dequeue(Deadline.new(timeout))
+      raise TimeoutError.new("receive timed out") unless entry
+
+      if entry.is_a?(Message)
+        yield View.new(entry.payload, entry.type, entry.priority)
         return
       end
 
-      entry = dequeue(Deadline.new(timeout))
-      raise TimeoutError.new("receive timed out") unless entry
       descriptor, priority = entry
       begin
         yield View.new(@segment.block(descriptor.block)[0, descriptor.size.to_i32],
@@ -127,12 +128,10 @@ module IPCMail
 
     protected def read_message(deadline : Deadline) : Message?
       check_open
-      if message = drain_spill
-        return message
-      end
-
       entry = dequeue(deadline)
       return nil unless entry
+      return entry if entry.is_a?(Message)
+
       descriptor, priority = entry
       payload = @segment.block(descriptor.block)[0, descriptor.size.to_i32].dup
       finish(descriptor.block)
@@ -217,7 +216,7 @@ module IPCMail
       end
     end
 
-    private def dequeue(deadline : Deadline) : Tuple(LibIPC::Descriptor, Priority)?
+    private def dequeue(deadline : Deadline) : Tuple(LibIPC::Descriptor, Priority) | Message | Nil
       loop do
         @inbox.drain
 
@@ -237,6 +236,17 @@ module IPCMail
         end
 
         return entry if entry
+
+        if @overflow.spill?
+          if message = drain_spill
+            @segment.synchronize do
+              @segment.trace(message.type, message.payload.size.to_u32, message.priority,
+                receive_lane, :receive)
+            end
+            return message
+          end
+        end
+
         return nil if deadline.expired?
         @inbox.wait(deadline.remaining(WAIT_CAP))
       end
@@ -268,11 +278,22 @@ module IPCMail
 
     private def spill(payload : Bytes, type : UInt32, priority : Priority, deadline : Deadline) : Bool
       io = spill_io
-      io.write_timeout = deadline.remaining
-      Framing.write(io, payload, type, priority)
-      true
-    rescue IO::TimeoutError
-      false
+
+      loop do
+        io.write_timeout = deadline.remaining(WAIT_CAP)
+        begin
+          Framing.write(io, payload, type, priority)
+          @segment.synchronize do
+            @segment.trace(type, payload.size.to_u32, priority, transmit_lane, :send)
+          end
+          return true
+        rescue IO::TimeoutError
+          if deadline.infinite?
+            next
+          end
+          return false if deadline.expired?
+        end
+      end
     end
 
     private def spill_io : IO::FileDescriptor

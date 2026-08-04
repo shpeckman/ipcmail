@@ -18,8 +18,14 @@ class IPCMail::Segment
 
   def self.create(name : String, kind : Kind, config : Config) : Segment
     layout = Layout.from(config, kind)
-    fd     = LibIPC.shm_open(name, LibC::O_RDWR | LibC::O_CREAT, config.mode)
-    raise SystemError.new("shm_open(#{name})") if fd < 0
+    fd     = LibIPC.shm_open(name, LibC::O_RDWR | LibC::O_CREAT | LibC::O_EXCL, config.mode)
+    if fd < 0
+      errno = Errno.value
+      if errno.eexist?
+        raise Error.new("segment #{name} already exists, attach to it with IPCMail.open")
+      end
+      raise SystemError.new("shm_open(#{name})", errno)
+    end
 
     begin
       raise SystemError.new("ftruncate(#{name})") if LibC.ftruncate(fd, layout.bytes) < 0

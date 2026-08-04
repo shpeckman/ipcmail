@@ -120,7 +120,10 @@ module IPCMail
     private def read_frame(reader : IO, deadline : Deadline) : Message?
       @consumed = false
 
-      return nil unless fill(reader, @header, deadline, allow_empty: true)
+      case fill(reader, @header, deadline, allow_empty: true)
+      when Fill::Closed  then raise ClosedError.new("the peer closed the connection")
+      when Fill::Timeout then return nil
+      end
 
       head    = Framing.decode(@header, @limit)
       payload = Bytes.new(head.size)
@@ -131,19 +134,31 @@ module IPCMail
       nil
     end
 
-    private def fill(reader : IO, buffer : Bytes, deadline : Deadline, allow_empty : Bool) : Bool
+    private enum Fill
+      Complete
+      Timeout
+      Closed
+    end
+
+    private def fill(reader : IO, buffer : Bytes, deadline : Deadline, allow_empty : Bool) : Fill
       filled = 0
       while filled < buffer.size
         read_timeout(reader, deadline.remaining)
-        count = reader.read(buffer + filled)
+        begin
+          count = reader.read(buffer + filled)
+        rescue IO::TimeoutError
+          raise ClosedError.new("the peer stalled mid-frame") if @consumed || filled > 0
+          return Fill::Timeout
+        end
+
         if count == 0
           raise IO::EOFError.new unless filled == 0 && allow_empty && !@consumed
-          return false
+          return Fill::Closed
         end
         @consumed = true
         filled += count
       end
-      true
+      Fill::Complete
     end
 
     private def read_timeout(io : IO, span : Time::Span?) : Nil

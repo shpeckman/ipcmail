@@ -68,7 +68,7 @@ struct IPCMail::Address
   end
 
   def framed? : Bool?
-    if stream = boolean?("stream")
+    unless (stream = boolean?("stream")).nil?
       return !stream
     end
     boolean?("framed")
