@@ -1,5 +1,16 @@
 # src/ipcmail/bus.cr
 module IPCMail
+  # A `Bus` instance is owned by a single fiber. Its subscriber slot and inbox
+  # signal are a single logical endpoint, so two fibers sharing one `Bus` would
+  # race on the inbox and steal each other's wakeups. To fan work across fibers
+  # or execution contexts, open one `Bus` per fiber: each subscriber claims its
+  # own slot, and each publisher owns its own handle. The cross-process segment
+  # lock is designed to be held briefly by many independent owners, so N buses
+  # scale cleanly across `Fiber::ExecutionContext::Parallel` schedulers.
+  #
+  # The publish-side sender cache is the one exception: it is guarded so that a
+  # violation of the single-owner contract on the publish path degrades to lost
+  # wakeups rather than memory corruption of the underlying `Hash`.
   class Bus < Mailbox
     WAIT_CAP = 100.milliseconds
     RETRY    = 500.microseconds
@@ -42,6 +53,7 @@ module IPCMail
       @slot         = nil.as(UInt32?)
       @inbox        = nil.as(Signal?)
       @senders      = {} of UInt32 => Signal::Sender
+      @senders_lock = Sync::Mutex.new
       @trace_cursor = 0_u64
       @closed       = false
     end
@@ -154,8 +166,10 @@ module IPCMail
       return if @closed
       unsubscribe
       @closed = true
-      @senders.each_value &.close
-      @senders.clear
+      @senders_lock.synchronize do
+        @senders.each_value &.close
+        @senders.clear
+      end
       @segment.close
     end
 
@@ -306,7 +320,9 @@ module IPCMail
     end
 
     private def notify(slot : UInt32) : Nil
-      sender = @senders[slot] ||= Signal::Sender.new(Signal.path_for(@segment.name, "sub#{slot}"))
+      sender = @senders_lock.synchronize do
+        @senders[slot] ||= Signal::Sender.new(Signal.path_for(@segment.name, "sub#{slot}"))
+      end
       sender.notify
     end
   end

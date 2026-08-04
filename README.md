@@ -246,6 +246,51 @@ mailbox.send?("best effort")             # Bool
 mailbox.each(timeout: 100.milliseconds) { |m| handle(m) }  # until idle/closed
 ```
 
+## Concurrency and execution contexts
+
+ipcmail is built for Crystal 1.21's execution contexts. Idle waits are routed
+through the event loop, so a fiber blocked in `receive` parks and yields its
+scheduler thread rather than pinning it — this holds under
+`Fiber::ExecutionContext::Concurrent`, `Parallel`, and `Isolated` alike. Fibers
+in different contexts coordinate through shared memory, so two processes and two
+parallel schedulers use the same delivery path.
+
+The ownership rule is one mailbox per fiber. A mailbox owns transport state — a
+`Bus` owns a single subscriber slot and one inbox signal; a `Stream` owns its
+reader and writer — and that state is a single logical endpoint. Sharing one
+handle across fibers races on the inbox and steals wakeups. To fan work across
+cores, open one mailbox per fiber: each `Bus` subscriber claims its own slot,
+each publisher owns its own handle. The cross-process segment lock is held only
+for brief in-memory bookkeeping, so N independent handles scale cleanly across a
+parallel context's schedulers.
+
+```crystal
+require "wait_group"
+
+publisher  = IPCMail.create(IPCMail::Bus, "bus://work?subs=8&capacity=64")
+consumers  = Fiber::ExecutionContext::Parallel.new("consumers", 4)
+subscribed = WaitGroup.new(4)
+
+4.times do
+  consumers.spawn do
+    sub = IPCMail.open(IPCMail::Bus, "bus://work")   # one Bus per fiber
+    sub.subscribe
+    subscribed.done
+    sub.each { |m| handle(m) }
+  ensure
+    sub.close
+  end
+end
+
+subscribed.wait
+publisher.publish("go")
+```
+
+The one guarantee beyond the single-owner rule: the publish-side sender cache is
+internally synchronized, so a stray cross-fiber publish degrades to a lost
+wakeup rather than corrupting shared state. Everything else assumes single-fiber
+ownership. See `examples/execution_context.cr` for a complete runnable version.
+
 ## Observability
 
 Attach a read-only `Monitor` to any live `shm`/`bus` segment to inspect it
@@ -342,7 +387,9 @@ Adds `capacity`, `block_size`, `pending`, `queued`, `overflow`, `trace(limit = 6
 
 Adds `subscribe` / `subscribe(*types)` / `subscribe(Enumerable)`, `unsubscribe`,
 `subscribed?`, `slot`, `subscribers`, `pending`, `capacity`, `block_size`,
-`publish(...)` (returns delivery count), `trace(limit = 64)`, and `segment`.
+`publish(...)` (returns delivery count), `trace(limit = 64)`, and `segment`. A
+`Bus` is owned by a single fiber; open one per fiber to fan work across an
+execution context (see [Concurrency and execution contexts](#concurrency-and-execution-contexts)).
 
 ### `IPCMail::Socket < Stream`
 
@@ -425,13 +472,26 @@ polled.
 
 ## Development
 
+A `Makefile` wraps the common tasks:
+
 ```
-crystal spec          # full suite, including multi-process crash-recovery tests
-crystal run examples/shared_memory.cr
+make check                 # compile-only check of the library
+make spec                  # full suite, including multi-process crash-recovery tests
+make examples              # build and run every example in examples/
+make spec-ec               # execution-context spec under CRYSTAL_WORKERS
+make examples-ec           # execution-context example under CRYSTAL_WORKERS
+make run-<name>            # run a single example, e.g. make run-bus
 ```
+
+`spec-ec` and `examples-ec` set `CRYSTAL_WORKERS` (default `4`, override with
+`make spec-ec CRYSTAL_WORKERS=8`) so the parallel-context tests and example
+exercise real multi-scheduler delivery. Plain `crystal spec` / `crystal run`
+work too.
 
 The spec suite spawns real child processes (via `spec/support/peer.cr`) to
 SIGKILL a lock holder mid-critical-section and assert the segment recovers.
+`spec/bus_execution_context_spec.cr` fans a bus across `Parallel` and
+`Isolated` contexts to exercise per-fiber ownership under real parallelism.
 
 > **Note:** this codebase uses manual column alignment. Do **not** run
 > `crystal tool format` — it would rewrite the alignment throughout.
