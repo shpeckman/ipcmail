@@ -14,11 +14,11 @@ Bench.section("stream throughput (framed)")
 end
 
 [64, 4096].each do |size|
-  path   = Bench.socket_path
-  server = IPCMail::Socket::Server.listen(path)
+  path     = Bench.socket_path
+  server   = IPCMail::Socket::Server.listen(path)
   accepted = Channel(IPCMail::Socket).new
   spawn { accepted.send(server.accept(timeout: 30.seconds)) }
-  client = IPCMail::Socket.connect(path)
+  client     = IPCMail::Socket.connect(path)
   connection = accepted.receive
   begin
     Bench.throughput("unix socket #{size}B", 100_000, Bench.payload(size), client, connection)
@@ -31,7 +31,7 @@ end
 end
 
 [64, 4096].each do |size|
-  path = Bench.fifo_path
+  path   = Bench.fifo_path
   reader = nil.as(IPCMail::Pipe?)
   opened = Channel(Nil).new
   spawn do
@@ -63,11 +63,11 @@ Bench.section("stream round-trip latency (framed)")
 end
 
 [64, 4096].each do |size|
-  path   = Bench.socket_path
-  server = IPCMail::Socket::Server.listen(path)
+  path     = Bench.socket_path
+  server   = IPCMail::Socket::Server.listen(path)
   accepted = Channel(IPCMail::Socket).new
   spawn { accepted.send(server.accept(timeout: 30.seconds)) }
-  client = IPCMail::Socket.connect(path)
+  client     = IPCMail::Socket.connect(path)
   connection = accepted.receive
   begin
     Bench.latency("unix socket #{size}B", 50_000, Bench.payload(size), client, connection)

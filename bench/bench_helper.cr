@@ -27,10 +27,10 @@ module Bench
   end
 
   struct Throughput
-    getter label : String
+    getter label    : String
     getter messages : Int32
-    getter bytes : Int32
-    getter elapsed : Time::Span
+    getter bytes    : Int32
+    getter elapsed  : Time::Span
 
     def initialize(@label, @messages, @bytes, @elapsed)
     end
@@ -45,7 +45,7 @@ module Bench
   end
 
   struct Latency
-    getter label : String
+    getter label   : String
     getter samples : Array(Float64)
 
     def initialize(@label, @samples)
