@@ -60,7 +60,7 @@ end
 
 describe IPCMail::Monitor do
   it "reports segment statistics" do
-    name = SpecSupport.shm_name
+    name     = SpecSupport.shm_name
     producer = IPCMail::SharedMemory.create(name, capacity: 8, blocks: 16)
     monitor  = IPCMail.monitor("shm://#{name}")
     begin
@@ -79,7 +79,7 @@ describe IPCMail::Monitor do
   end
 
   it "reports subscriber rings for a bus" do
-    name = SpecSupport.shm_name
+    name       = SpecSupport.shm_name
     publisher  = IPCMail::Bus.create(name, subscribers: 4)
     subscriber = IPCMail::Bus.open(name)
     monitor    = IPCMail.monitor("bus://#{name}")

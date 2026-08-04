@@ -3,7 +3,7 @@ require "./spec_helper"
 
 describe IPCMail::Buffer do
   it "creates, maps, and shares a region by name" do
-    name = "/#{SpecSupport.token}"
+    name    = "/#{SpecSupport.token}"
     creator = IPCMail::Buffer.create(4096, name)
     begin
       creator.size.should eq(4096_i64)
@@ -41,7 +41,7 @@ describe IPCMail::Buffer do
   end
 
   it "enforces read-only mappings" do
-    name = "/#{SpecSupport.token}"
+    name    = "/#{SpecSupport.token}"
     creator = IPCMail::Buffer.create(64, name)
     begin
       reader = IPCMail::Buffer.open(name, read_only: true)

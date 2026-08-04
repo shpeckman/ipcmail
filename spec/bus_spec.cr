@@ -2,7 +2,7 @@
 require "./spec_helper"
 
 private def with_bus(subscribers : Int = 16, blocks : Int = 64, &)
-  name = SpecSupport.shm_name
+  name      = SpecSupport.shm_name
   publisher = IPCMail::Bus.create(name, subscribers: subscribers, blocks: blocks)
   begin
     yield name, publisher
@@ -83,7 +83,7 @@ describe IPCMail::Bus do
   it "rejects more type filters than supported" do
     with_bus do |name, _|
       subscriber = IPCMail::Bus.open(name)
-      filters = Array(Int32).new(LibIPC::MAX_TYPES + 1) { |i| i }
+      filters    = Array(Int32).new(LibIPC::MAX_TYPES + 1) { |i| i }
       expect_raises(ArgumentError, /type filters/) { subscriber.subscribe(filters) }
       subscriber.close
     end

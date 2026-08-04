@@ -123,7 +123,7 @@ describe IPCMail::SharedMemory do
   end
 
   it "surfaces backpressure when the spill channel saturates with a deadline" do
-    name = SpecSupport.shm_name
+    name     = SpecSupport.shm_name
     producer = IPCMail::SharedMemory.create(name, block_size: 60000, blocks: 1, overflow: :spill)
     begin
       big = Bytes.new(59000, 1_u8)
@@ -150,7 +150,7 @@ describe IPCMail::SharedMemory do
   end
 
   it "refuses to create over an existing segment" do
-    name = SpecSupport.shm_name
+    name  = SpecSupport.shm_name
     first = IPCMail::SharedMemory.create(name)
     begin
       expect_raises(IPCMail::Error, /already exists/) { IPCMail::SharedMemory.create(name) }
@@ -160,7 +160,7 @@ describe IPCMail::SharedMemory do
   end
 
   it "waits for the segment to appear when opening with a timeout" do
-    name = SpecSupport.shm_name
+    name   = SpecSupport.shm_name
     opened = nil.as(IPCMail::SharedMemory?)
     fiber = spawn do
       opened = IPCMail::SharedMemory.open(name, timeout: 2.seconds)
@@ -192,7 +192,7 @@ describe IPCMail::SharedMemory do
   end
 
   it "reports closed after close" do
-    name = SpecSupport.shm_name
+    name     = SpecSupport.shm_name
     producer = IPCMail::SharedMemory.create(name)
     producer.closed?.should be_false
     producer.close

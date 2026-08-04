@@ -12,7 +12,7 @@ describe IPCMail::Socket do
       sleep 20.milliseconds
 
       client.send("ping", type: 3)
-      peer = accepted.not_nil!
+      peer    = accepted.not_nil!
       message = peer.receive
       message.text.should eq("ping")
       message.type.should eq(3_u32)
