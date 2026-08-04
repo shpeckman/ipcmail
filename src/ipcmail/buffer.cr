@@ -4,19 +4,19 @@ class IPCMail::Buffer
   ATTEMPTS = 8
   RETRY    = 500.microseconds
 
-  getter name : String
-  getter size : Int64
-  getter? creator : Bool
+  getter name       : String
+  getter size       : Int64
+  getter? creator   : Bool
   getter? read_only : Bool
-  getter? closed : Bool
+  getter? closed    : Bool
 
   def self.create(size : Int, name : String? = nil, mode : Int = 0o600) : Buffer
     raise ArgumentError.new("size must be positive") if size < 1
-    bytes = size.to_i64
-    flags = LibC::O_RDWR | LibC::O_CREAT | LibC::O_EXCL
+    bytes       = size.to_i64
+    flags       = LibC::O_RDWR | LibC::O_CREAT | LibC::O_EXCL
     permissions = mode.to_u32
-    chosen = ""
-    fd = -1
+    chosen      = ""
+    fd          = -1
 
     (name ? 1 : ATTEMPTS).times do
       chosen = name || generate
@@ -52,8 +52,8 @@ class IPCMail::Buffer
   def self.open(name : String, read_only : Bool = false, timeout : Time::Span? = nil) : Buffer
     validate(name)
     deadline = Deadline.new(timeout)
-    flags = read_only ? LibC::O_RDONLY : LibC::O_RDWR
-    fd = -1
+    flags    = read_only ? LibC::O_RDONLY : LibC::O_RDWR
+    fd       = -1
 
     loop do
       fd = LibIPC.shm_open(name, flags, 0_u32)

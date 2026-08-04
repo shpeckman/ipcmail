@@ -7,18 +7,18 @@ class IPCMail::Segment
   BACKOFF      = 200.microseconds
   ATTACH_RETRY = 500.microseconds
 
-  getter name : String
-  getter layout : Layout
-  getter kind : Kind
+  getter name     : String
+  getter layout   : Layout
+  getter kind     : Kind
   getter? creator : Bool
-  getter? closed : Bool
+  getter? closed  : Bool
 
-  @base : Pointer(UInt8)
+  @base   : Pointer(UInt8)
   @header : Pointer(LibIPC::Header)
 
   def self.create(name : String, kind : Kind, config : Config) : Segment
     layout = Layout.from(config, kind)
-    fd = LibIPC.shm_open(name, LibC::O_RDWR | LibC::O_CREAT, config.mode)
+    fd     = LibIPC.shm_open(name, LibC::O_RDWR | LibC::O_CREAT, config.mode)
     raise SystemError.new("shm_open(#{name})") if fd < 0
 
     begin
@@ -37,7 +37,7 @@ class IPCMail::Segment
 
   def self.attach(name : String, kind : Kind, timeout : Time::Span?) : Segment
     deadline = Deadline.new(timeout)
-    fd = -1
+    fd       = -1
 
     loop do
       fd = LibIPC.shm_open(name, LibC::O_RDWR, 0_u32)
@@ -69,7 +69,7 @@ class IPCMail::Segment
     end
 
     header = base.as(LibIPC::Header*)
-    ready = (base + offsetof(LibIPC::Header, @ready)).as(Atomic(UInt32)*)
+    ready  = (base + offsetof(LibIPC::Header, @ready)).as(Atomic(UInt32)*)
 
     until ready.value.get(:acquire) == 1
       magic = header.value.magic
@@ -186,7 +186,7 @@ class IPCMail::Segment
 
   def lock : Nil
     return if try_lock
-    spins = 0
+    spins   = 0
     started = Time.instant
 
     until try_lock
@@ -242,9 +242,9 @@ class IPCMail::Segment
       queues[index] = queue
     end
 
-    owners = block_owners
+    owners     = block_owners
     references = block_references
-    live = Array(UInt32).new(@layout.block_count, 0_u32)
+    live       = Array(UInt32).new(@layout.block_count, 0_u32)
 
     max_subscribers.times do |slot|
       subscriber = subscribers[slot]
@@ -262,7 +262,7 @@ class IPCMail::Segment
         queue.tail = 0_u32 if queue.tail >= capacity
         rings[priority] = queue
         descriptors = subscriber_descriptors(slot.to_u32, priority.to_u32)
-        cursor = queue.tail
+        cursor      = queue.tail
         while cursor != queue.head
           live[descriptors[cursor].block] += 1
           cursor = (cursor &+ 1) % capacity
@@ -279,9 +279,9 @@ class IPCMail::Segment
     end
 
     4.times do |lane|
-      queue = queues[lane]
+      queue       = queues[lane]
       descriptors = descriptors_for(lane)
-      cursor = queue.tail
+      cursor      = queue.tail
       while cursor != queue.head
         live[descriptors[cursor].block] += 1
         cursor = (cursor &+ 1) % capacity
@@ -299,10 +299,10 @@ class IPCMail::Segment
   end
 
   def claim_block : UInt32?
-    owners = block_owners
+    owners     = block_owners
     references = block_references
-    pid = Process.pid.to_u32
-    index = 0_u32
+    pid        = Process.pid.to_u32
+    index      = 0_u32
 
     while index < @layout.block_count
       if owners[index] == 0 && references[index] == 0
@@ -339,7 +339,7 @@ class IPCMail::Segment
 
   def blocks_in_use : UInt32
     owners = block_owners
-    count = 0_u32
+    count  = 0_u32
     @layout.block_count.times { |index| count += 1 if owners[index] != 0 }
     count
   end
@@ -350,7 +350,7 @@ class IPCMail::Segment
 
   def push(lane : Int32, descriptor : LibIPC::Descriptor) : Bool
     queues = queue_pointer
-    queue = queues[lane]
+    queue  = queues[lane]
     return false if (queue.head &+ 1) % capacity == queue.tail
     descriptors_for(lane)[queue.head] = descriptor
     Atomic.fence
@@ -361,7 +361,7 @@ class IPCMail::Segment
 
   def pop(lane : Int32) : LibIPC::Descriptor?
     queues = queue_pointer
-    queue = queues[lane]
+    queue  = queues[lane]
     return nil if queue.head == queue.tail
     descriptor = descriptors_for(lane)[queue.tail]
     queue.tail = (queue.tail &+ 1) % capacity
@@ -407,7 +407,7 @@ class IPCMail::Segment
 
   def claim_subscriber(types : Array(UInt32)) : UInt32?
     max_subscribers.times do |index|
-      slot = index.to_u32
+      slot       = index.to_u32
       subscriber = subscribers[slot]
       next unless subscriber.active == 0
 
@@ -429,9 +429,9 @@ class IPCMail::Segment
 
     rings = subscriber_rings(slot)
     2.times do |priority|
-      queue = rings[priority]
+      queue       = rings[priority]
       descriptors = subscriber_descriptors(slot, priority.to_u32)
-      cursor = queue.tail
+      cursor      = queue.tail
       while cursor != queue.head
         release_block(descriptors[cursor].block)
         cursor = (cursor &+ 1) % capacity
@@ -446,7 +446,7 @@ class IPCMail::Segment
 
   def each_subscriber(& : UInt32, LibIPC::Subscriber ->) : Nil
     max_subscribers.times do |index|
-      slot = index.to_u32
+      slot       = index.to_u32
       subscriber = subscribers[slot]
       yield slot, subscriber if subscriber.active != 0
     end
@@ -455,7 +455,7 @@ class IPCMail::Segment
   def trace(type : UInt32, size : UInt32, priority : Priority, lane : Lane, event : Event) : Nil
     return if trace_capacity == 0
     sequence = @header.value.trace_seq
-    record = LibIPC::Record.new
+    record   = LibIPC::Record.new
     record.at = Time.utc.to_unix_ns
     record.seq = sequence
     record.type = type
@@ -473,10 +473,10 @@ class IPCMail::Segment
     return {records, cursor} if trace_capacity == 0
 
     synchronize do
-      total = @header.value.trace_seq
-      oldest = total > trace_capacity ? total - trace_capacity : 0_u64
+      total    = @header.value.trace_seq
+      oldest   = total > trace_capacity ? total - trace_capacity : 0_u64
       sequence = cursor < oldest ? oldest : cursor
-      ring = trace_records
+      ring     = trace_records
       while sequence < total && records.size < limit
         records << TraceRecord.new(ring[sequence % trace_capacity])
         sequence += 1
@@ -490,7 +490,7 @@ class IPCMail::Segment
   def close : Bool
     return false if @closed
     @closed = true
-    last = attach_flag.value.sub(1_u32, :acquire_release) <= 1
+    last    = attach_flag.value.sub(1_u32, :acquire_release) <= 1
     LibC.munmap(@base.as(Void*), LibC::SizeT.new(@layout.bytes))
     LibC.close(@fd)
     LibIPC.shm_unlink(@name) if last

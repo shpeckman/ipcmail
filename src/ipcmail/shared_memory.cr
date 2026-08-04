@@ -4,9 +4,9 @@ module IPCMail
     WAIT_CAP    = 100.milliseconds
     SPILL_LIMIT = 1 << 20
 
-    getter segment : Segment
+    getter segment  : Segment
     getter overflow : Overflow
-    getter? closed : Bool
+    getter? closed  : Bool
 
     def self.create(name : String, capacity : Int = 32, block_size : Int = 256, blocks : Int = 64,
                     trace : Int = 0, overflow : Overflow = :fail, mode : Int = 0o600) : SharedMemory
@@ -37,13 +37,13 @@ module IPCMail
 
     protected def initialize(@segment : Segment, @overflow : Overflow, mode : UInt32)
       inbox, outbox = @segment.creator? ? {"a", "b"} : {"b", "a"}
-      @inbox = Signal.new(Signal.path_for(@segment.name, inbox), mode)
-      @outbox = Signal::Sender.new(Signal.path_for(@segment.name, outbox))
+      @inbox         = Signal.new(Signal.path_for(@segment.name, inbox), mode)
+      @outbox        = Signal::Sender.new(Signal.path_for(@segment.name, outbox))
       @transmit_lane = @segment.creator? ? 0 : 2
-      @receive_lane = @segment.creator? ? 2 : 0
-      @mode = mode
-      @spill = nil.as(IO::FileDescriptor?)
-      @closed = false
+      @receive_lane  = @segment.creator? ? 2 : 0
+      @mode          = mode
+      @spill         = nil.as(IO::FileDescriptor?)
+      @closed        = false
     end
 
     def block_size : UInt32
@@ -188,7 +188,7 @@ module IPCMail
 
     private def enqueue(index : UInt32, size : UInt32, type : UInt32, priority : Priority,
                         deadline : Deadline) : Bool
-      lane = @transmit_lane + priority.value.to_i32
+      lane       = @transmit_lane + priority.value.to_i32
       descriptor = LibIPC::Descriptor.new(block: index, size: size, type: type)
 
       loop do
@@ -222,10 +222,10 @@ module IPCMail
         @inbox.drain
 
         entry = @segment.synchronize do
-          priority = Priority::High
+          priority   = Priority::High
           descriptor = @segment.pop(@receive_lane + 1)
           unless descriptor
-            priority = Priority::Normal
+            priority   = Priority::Normal
             descriptor = @segment.pop(@receive_lane)
           end
 

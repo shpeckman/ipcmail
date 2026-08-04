@@ -18,48 +18,48 @@ lib LibIPC
 
   struct Descriptor
     block : UInt32
-    size : UInt32
-    type : UInt32
+    size  : UInt32
+    type  : UInt32
   end
 
   struct Subscriber
-    active : UInt32
-    pid : UInt32
+    active     : UInt32
+    pid        : UInt32
     types_size : UInt32
-    types : UInt32[8]
-    rings : Queue[2]
+    types      : UInt32[8]
+    rings      : Queue[2]
   end
 
   struct Record
-    at : Int64
-    seq : UInt64
-    type : UInt32
-    size : UInt32
+    at       : Int64
+    seq      : UInt64
+    type     : UInt32
+    size     : UInt32
     priority : UInt8
-    lane : UInt8
-    event : UInt8
+    lane     : UInt8
+    event    : UInt8
     reserved : UInt8
   end
 
   struct Header
-    lock : UInt64[8]
-    recovery : UInt64[8]
-    magic : UInt32
-    version : UInt32
-    kind : UInt32
-    ready : UInt32
-    owner : UInt32
-    damaged : UInt32
-    attach_count : UInt32
-    capacity : UInt32
-    block_size : UInt32
-    block_count : UInt32
-    trace_capacity : UInt32
-    max_subscribers : UInt32
+    lock             : UInt64[8]
+    recovery         : UInt64[8]
+    magic            : UInt32
+    version          : UInt32
+    kind             : UInt32
+    ready            : UInt32
+    owner            : UInt32
+    damaged          : UInt32
+    attach_count     : UInt32
+    capacity         : UInt32
+    block_size       : UInt32
+    block_count      : UInt32
+    trace_capacity   : UInt32
+    max_subscribers  : UInt32
     subscriber_count : UInt32
-    trace_seq : UInt64
-    queues : Queue[4]
-    subscribers : Subscriber[16]
+    trace_seq        : UInt64
+    queues           : Queue[4]
+    subscribers      : Subscriber[16]
   end
 
   fun shm_open(name : LibC::Char*, oflag : LibC::Int, mode : LibC::ModeT) : LibC::Int

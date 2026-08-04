@@ -1,7 +1,7 @@
 # src/ipcmail/signal.cr
 module IPCMail
   class Signal
-    getter path : String
+    getter path    : String
     getter? closed : Bool
 
     def self.path_for(name : String, tag : String) : String
@@ -27,7 +27,7 @@ module IPCMail
       @io.read_buffering = false
       @io.sync = true
       @scratch = Bytes.new(64)
-      @closed = false
+      @closed  = false
     end
 
     def drain : Nil
@@ -70,7 +70,7 @@ module IPCMail
     getter path : String
 
     def initialize(@path : String)
-      @fd = -1
+      @fd     = -1
       @closed = false
     end
 
@@ -98,7 +98,7 @@ module IPCMail
     end
 
     private def attempt : Result
-      byte = 1_u8
+      byte  = 1_u8
       count = LibC.write(@fd, pointerof(byte).as(Void*), LibC::SizeT.new(1))
       return Result::Delivered if count == 1
 

@@ -12,11 +12,11 @@ module IPCMail
 
     protected def initialize(@reader : IO?, @writer : IO?, @framed : Bool,
                              @chunk : Int32 = CHUNK, @limit : Int32 = LIMIT)
-      @read_lock = Sync::Mutex.new
+      @read_lock  = Sync::Mutex.new
       @write_lock = Sync::Mutex.new
-      @header = Bytes.new(Framing::HEADER_SIZE)
-      @consumed = false
-      @closed = false
+      @header     = Bytes.new(Framing::HEADER_SIZE)
+      @consumed   = false
+      @closed     = false
     end
 
     def readable? : Bool
@@ -39,8 +39,8 @@ module IPCMail
     def close : Nil
       return if @closed
       @closed = true
-      writer = @writer
-      reader = @reader
+      writer  = @writer
+      reader  = @reader
       writer.close if writer
       reader.close if reader && !reader.same?(writer)
     rescue IO::Error
@@ -74,7 +74,7 @@ module IPCMail
     protected def write_in_place(size : Int, type : UInt32, priority : Priority,
                                  deadline : Deadline, & : Bytes ->) : Bool
       check_open
-      writer = @writer || raise Error.new("mailbox is receive only")
+      writer  = @writer || raise Error.new("mailbox is receive only")
       payload = Bytes.new(size)
       yield payload
 
@@ -110,7 +110,7 @@ module IPCMail
     private def read_chunk(reader : IO, deadline : Deadline) : Message?
       read_timeout(reader, deadline.remaining)
       buffer = Bytes.new(@chunk)
-      count = reader.read(buffer)
+      count  = reader.read(buffer)
       raise IO::EOFError.new if count == 0
       Message.new(buffer[0, count].dup, 0_u32, Priority::Normal)
     rescue IO::TimeoutError
@@ -122,7 +122,7 @@ module IPCMail
 
       return nil unless fill(reader, @header, deadline, allow_empty: true)
 
-      head = Framing.decode(@header, @limit)
+      head    = Framing.decode(@header, @limit)
       payload = Bytes.new(head.size)
       fill(reader, payload, deadline, allow_empty: false) if head.size > 0
       Message.new(payload, head.type, head.priority)

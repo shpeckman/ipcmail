@@ -4,9 +4,9 @@ module IPCMail
     WAIT_CAP = 100.milliseconds
     RETRY    = 500.microseconds
 
-    getter segment : Segment
+    getter segment  : Segment
     getter overflow : Overflow
-    getter? closed : Bool
+    getter? closed  : Bool
 
     def self.create(name : String, capacity : Int = 32, block_size : Int = 256, blocks : Int = 64,
                     trace : Int = 0, subscribers : Int = LibIPC::MAX_SUBSCRIBERS,
@@ -38,12 +38,12 @@ module IPCMail
 
     protected def initialize(@segment : Segment, @overflow : Overflow, mode : UInt32)
       raise ArgumentError.new("a bus cannot spill, use :fail or :block") if @overflow.spill?
-      @mode = mode
-      @slot = nil.as(UInt32?)
-      @inbox = nil.as(Signal?)
-      @senders = {} of UInt32 => Signal::Sender
+      @mode         = mode
+      @slot         = nil.as(UInt32?)
+      @inbox        = nil.as(Signal?)
+      @senders      = {} of UInt32 => Signal::Sender
       @trace_cursor = 0_u64
-      @closed = false
+      @closed       = false
     end
 
     def block_size : UInt32
@@ -105,7 +105,7 @@ module IPCMail
         inbox.unlink
       end
       @inbox = nil
-      @slot = nil
+      @slot  = nil
     end
 
     def publish(payload : Bytes, *, type : Int = 0, priority : Priority = :normal,
@@ -266,10 +266,10 @@ module IPCMail
         inbox.drain
 
         entry = @segment.synchronize do
-          priority = Priority::High
+          priority   = Priority::High
           descriptor = @segment.pop_subscriber(slot, :high)
           unless descriptor
-            priority = Priority::Normal
+            priority   = Priority::Normal
             descriptor = @segment.pop_subscriber(slot, :normal)
           end
 

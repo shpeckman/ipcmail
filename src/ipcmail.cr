@@ -71,7 +71,7 @@ module IPCMail
                          overflow : Overflow? = nil, mode : Int? = nil, framed : Bool? = nil,
                          direction : Pipe::Direction | Symbol | Nil = nil,
                          timeout : Time::Span? = 5.seconds) : Mailbox
-    address = Address.parse(uri)
+    address  = Address.parse(uri)
     settings = config(address, capacity, block_size, blocks, trace, subscribers, overflow, mode)
 
     case address.scheme
@@ -135,8 +135,8 @@ module IPCMail
   private def self.attach(uri : String, *, overflow : Overflow? = nil, mode : Int? = nil,
                           framed : Bool? = nil, direction : Pipe::Direction | Symbol | Nil = nil,
                           timeout : Time::Span? = 5.seconds) : Mailbox
-    address = Address.parse(uri)
-    policy = overflow || address.overflow? || Overflow::Fail
+    address     = Address.parse(uri)
+    policy      = overflow || address.overflow? || Overflow::Fail
     permissions = mode || address.mode? || 0o600
 
     case address.scheme

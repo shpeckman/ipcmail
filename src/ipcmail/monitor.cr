@@ -1,17 +1,17 @@
 # src/ipcmail/monitor.cr
 class IPCMail::Monitor
   struct Stats
-    getter name : String
-    getter kind : Kind
-    getter capacity : UInt32
-    getter block_size : UInt32
-    getter block_count : UInt32
-    getter blocks_in_use : UInt32
-    getter subscribers : UInt32
+    getter name            : String
+    getter kind            : Kind
+    getter capacity        : UInt32
+    getter block_size      : UInt32
+    getter block_count     : UInt32
+    getter blocks_in_use   : UInt32
+    getter subscribers     : UInt32
     getter max_subscribers : UInt32
-    getter trace_capacity : UInt32
-    getter lanes : Array(UInt32)
-    getter rings : Array(Tuple(UInt32, UInt32, UInt32))
+    getter trace_capacity  : UInt32
+    getter lanes           : Array(UInt32)
+    getter rings           : Array(Tuple(UInt32, UInt32, UInt32))
 
     def initialize(@name, @kind, @capacity, @block_size, @block_count, @blocks_in_use,
                    @subscribers, @max_subscribers, @trace_capacity, @lanes, @rings)

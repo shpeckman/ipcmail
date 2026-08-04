@@ -27,13 +27,13 @@ module IPCMail
   end
 
   struct Config
-    getter capacity : UInt32
-    getter block_size : UInt32
-    getter blocks : UInt32
-    getter trace : UInt32
+    getter capacity    : UInt32
+    getter block_size  : UInt32
+    getter blocks      : UInt32
+    getter trace       : UInt32
     getter subscribers : UInt32
-    getter overflow : Overflow
-    getter mode : UInt32
+    getter overflow    : Overflow
+    getter mode        : UInt32
 
     def initialize(capacity : Int = 32, block_size : Int = 256, blocks : Int = 64,
                    trace : Int = 0, subscribers : Int = LibIPC::MAX_SUBSCRIBERS,
@@ -43,12 +43,12 @@ module IPCMail
       raise ArgumentError.new("blocks must be positive") if blocks < 1
       raise ArgumentError.new("subscribers must be at least 1") if subscribers < 1
       raise ArgumentError.new("subscribers must not exceed #{LibIPC::MAX_SUBSCRIBERS}") if subscribers > LibIPC::MAX_SUBSCRIBERS
-      @capacity = capacity.to_u32
-      @block_size = block_size.to_u32
-      @blocks = blocks.to_u32
-      @trace = trace.to_u32
+      @capacity    = capacity.to_u32
+      @block_size  = block_size.to_u32
+      @blocks      = blocks.to_u32
+      @trace       = trace.to_u32
       @subscribers = subscribers.to_u32
-      @mode = mode.to_u32
+      @mode        = mode.to_u32
     end
   end
 
@@ -91,8 +91,8 @@ module IPCMail
   end
 
   struct Message
-    getter payload : Bytes
-    getter type : UInt32
+    getter payload  : Bytes
+    getter type     : UInt32
     getter priority : Priority
 
     def initialize(@payload : Bytes, @type : UInt32 = 0_u32, @priority : Priority = :normal)
@@ -121,8 +121,8 @@ module IPCMail
   end
 
   struct View
-    getter payload : Bytes
-    getter type : UInt32
+    getter payload  : Bytes
+    getter type     : UInt32
     getter priority : Priority
 
     def initialize(@payload : Bytes, @type : UInt32, @priority : Priority)
@@ -150,22 +150,22 @@ module IPCMail
   end
 
   struct TraceRecord
-    getter at : Time
+    getter at       : Time
     getter sequence : UInt64
-    getter type : UInt32
-    getter size : UInt32
+    getter type     : UInt32
+    getter size     : UInt32
     getter priority : Priority
-    getter lane : Lane
-    getter event : Event
+    getter lane     : Lane
+    getter event    : Event
 
     def initialize(record : LibIPC::Record)
-      @at = Time.unix_ns(record.at)
+      @at       = Time.unix_ns(record.at)
       @sequence = record.seq
-      @type = record.type
-      @size = record.size
+      @type     = record.type
+      @size     = record.size
       @priority = Priority.from_value(record.priority)
-      @lane = Lane.from_value(record.lane)
-      @event = Event.from_value(record.event)
+      @lane     = Lane.from_value(record.lane)
+      @event    = Event.from_value(record.event)
     end
 
     def to_s(io : IO) : Nil
