@@ -281,7 +281,7 @@ class IPCMail::Segment
     now = uninitialized LibC::Timespec
     LibIPC.clock_gettime(LibIPC::CLOCK_REALTIME, pointerof(now))
     nanos = now.tv_nsec.to_i64 + span.total_nanoseconds.to_i64
-    ts = uninitialized LibC::Timespec
+    ts    = uninitialized LibC::Timespec
     ts.tv_sec = typeof(ts.tv_sec).new(now.tv_sec.to_i64 + nanos // 1_000_000_000)
     ts.tv_nsec = typeof(ts.tv_nsec).new(nanos % 1_000_000_000)
     ts

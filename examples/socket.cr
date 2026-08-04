@@ -16,7 +16,7 @@ spawn do
   client.close
 end
 
-connection  = server.accept(timeout: 5.seconds)
+connection = server.accept(timeout: 5.seconds)
 credentials = connection.peer_credentials
 puts "peer uid=#{credentials.uid} gid=#{credentials.gid} pid=#{credentials.pid || "unknown"}"
 
