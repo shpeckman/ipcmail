@@ -28,7 +28,7 @@ module IPCMail
     def peer_credentials : Credentials
       {% if flag?(:linux) %}
         credentials = LibIPC::Ucred.new
-        size        = LibC::SocklenT.new(sizeof(LibIPC::Ucred))
+        size = LibC::SocklenT.new(sizeof(LibIPC::Ucred))
         result = LibC.getsockopt(@socket.fd, LibC::SOL_SOCKET, LibIPC::SO_PEERCRED,
           pointerof(credentials).as(Void*), pointerof(size))
         raise SystemError.new("getsockopt(SO_PEERCRED)") if result != 0
