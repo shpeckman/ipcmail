@@ -139,8 +139,9 @@ class IPCMail::Segment
 
   private def initialize(@name : String, @fd : Int32, @base : Pointer(UInt8),
                          @layout : Layout, @kind : Kind, @creator : Bool)
-    @header = @base.as(LibIPC::Header*)
-    @closed = false
+    @header       = @base.as(LibIPC::Header*)
+    @claim_cursor = 0_u32
+    @closed       = false
   end
 
   protected def prepare(config : Config) : Nil
@@ -375,14 +376,16 @@ class IPCMail::Segment
     owners     = block_owners
     references = block_references
     pid        = Process.pid.to_u32
-    index      = 0_u32
+    count      = @layout.block_count
+    start      = @claim_cursor
 
-    while index < @layout.block_count
+    count.times do |offset|
+      index = (start &+ offset) % count
       if owners[index] == 0 && references[index] == 0
         owners[index] = pid
+        @claim_cursor = (index &+ 1) % count
         return index
       end
-      index += 1
     end
     nil
   end

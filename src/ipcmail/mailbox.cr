@@ -58,6 +58,47 @@ abstract class IPCMail::Mailbox
   rescue ClosedError
   end
 
+  HANDLE_TYPE = 0xFFFFFF01_u32
+
+  def send_large(payload : Bytes, *, priority : Priority = :normal,
+                 timeout : Time::Span? = nil, mode : Int = 0o600) : Nil
+    buffer = Buffer.create(payload.size, mode: mode)
+    begin
+      buffer.to_slice.copy_from(payload)
+      handle = Handle.new(buffer.name, payload.size.to_i64)
+      send(handle.to_slice, type: HANDLE_TYPE, priority: priority, timeout: timeout)
+    rescue error
+      buffer.close(unlink: true)
+      raise error
+    ensure
+      buffer.close(unlink: false)
+    end
+  end
+
+  def send_large(payload : String, **options) : Nil
+    send_large(payload.to_slice, **options)
+  end
+
+  def receive_large(timeout : Time::Span? = nil) : Message
+    message = receive(timeout)
+    return message unless message.type == HANDLE_TYPE
+
+    handle = Handle.decode(message.payload)
+    Buffer.open(handle.name, read_only: true) do |buffer|
+      begin
+        Message.new(buffer.to_slice[0, handle.size.to_i32].dup, 0_u32, message.priority)
+      ensure
+        Buffer.unlink(handle.name)
+      end
+    end
+  end
+
+  def receive_large?(timeout : Time::Span? = nil) : Message?
+    receive_large(timeout)
+  rescue TimeoutError
+    nil
+  end
+
   protected def check_open : Nil
     raise ClosedError.new if closed?
   end

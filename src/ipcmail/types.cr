@@ -176,11 +176,38 @@ module IPCMail
   end
 
   struct Credentials
-    getter pid : Int32
+    getter pid : Int32?
     getter uid : UInt32
     getter gid : UInt32
 
-    def initialize(@pid : Int32, @uid : UInt32, @gid : UInt32)
+    def initialize(@pid : Int32?, @uid : UInt32, @gid : UInt32)
+    end
+  end
+
+  struct Handle
+    FORMAT = IO::ByteFormat::LittleEndian
+
+    getter name : String
+    getter size : Int64
+
+    def initialize(@name : String, @size : Int64)
+    end
+
+    def to_slice : Bytes
+      raw = name.to_slice
+      io  = IO::Memory.new(12 + raw.size)
+      io.write_bytes(@size, FORMAT)
+      io.write_bytes(raw.size.to_u32, FORMAT)
+      io.write(raw)
+      io.to_slice
+    end
+
+    def self.decode(payload : Bytes) : Handle
+      raise CorruptSegment.new("handle frame is truncated") if payload.size < 12
+      size   = FORMAT.decode(Int64, payload[0, 8])
+      length = FORMAT.decode(UInt32, payload[8, 4]).to_i32
+      raise CorruptSegment.new("handle name is truncated") if payload.size < 12 + length
+      Handle.new(String.new(payload[12, length]), size)
     end
   end
 end

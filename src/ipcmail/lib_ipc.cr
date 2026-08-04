@@ -1,6 +1,8 @@
 # src/ipcmail/lib_ipc.cr
 lib LibIPC
-  SO_PEERCRED     = 17
+  {% if flag?(:linux) %}
+    SO_PEERCRED = 17
+  {% end %}
   MAX_SUBSCRIBERS = 16
   MAX_TYPES       =  8
   SEM_WORDS       =  8
@@ -77,4 +79,8 @@ lib LibIPC
   fun sem_trywait(sem : Void*) : LibC::Int
   fun sem_timedwait(sem : Void*, abs_timeout : LibC::Timespec*) : LibC::Int
   fun clock_gettime(clock : LibC::Int, tp : LibC::Timespec*) : LibC::Int
+
+  {% unless flag?(:linux) %}
+    fun getpeereid(fd : LibC::Int, uid : LibC::UidT*, gid : LibC::GidT*) : LibC::Int
+  {% end %}
 end

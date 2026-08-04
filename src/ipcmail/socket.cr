@@ -26,12 +26,19 @@ module IPCMail
     end
 
     def peer_credentials : Credentials
-      credentials = LibIPC::Ucred.new
-      size        = LibC::SocklenT.new(sizeof(LibIPC::Ucred))
-      result = LibC.getsockopt(@socket.fd, LibC::SOL_SOCKET, LibIPC::SO_PEERCRED,
-        pointerof(credentials).as(Void*), pointerof(size))
-      raise SystemError.new("getsockopt(SO_PEERCRED)") if result != 0
-      Credentials.new(credentials.pid.to_i32, credentials.uid.to_u32, credentials.gid.to_u32)
+      {% if flag?(:linux) %}
+        credentials = LibIPC::Ucred.new
+        size        = LibC::SocklenT.new(sizeof(LibIPC::Ucred))
+        result = LibC.getsockopt(@socket.fd, LibC::SOL_SOCKET, LibIPC::SO_PEERCRED,
+          pointerof(credentials).as(Void*), pointerof(size))
+        raise SystemError.new("getsockopt(SO_PEERCRED)") if result != 0
+        Credentials.new(credentials.pid.to_i32, credentials.uid.to_u32, credentials.gid.to_u32)
+      {% else %}
+        uid = uninitialized LibC::UidT
+        gid = uninitialized LibC::GidT
+        raise SystemError.new("getpeereid") if LibIPC.getpeereid(@socket.fd, pointerof(uid), pointerof(gid)) != 0
+        Credentials.new(nil, uid.to_u32, gid.to_u32)
+      {% end %}
     end
 
     class Server
