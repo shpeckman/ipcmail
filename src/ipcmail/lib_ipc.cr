@@ -50,6 +50,7 @@ lib LibIPC
     ready            : UInt32
     owner            : UInt32
     damaged          : UInt32
+    generation       : UInt32
     attach_count     : UInt32
     capacity         : UInt32
     block_size       : UInt32
@@ -57,10 +58,13 @@ lib LibIPC
     trace_capacity   : UInt32
     max_subscribers  : UInt32
     subscriber_count : UInt32
+    endpoints        : UInt32[2]
     trace_seq        : UInt64
     queues           : Queue[4]
     subscribers      : Subscriber[16]
   end
+
+  CLOCK_REALTIME = 0
 
   fun shm_open(name : LibC::Char*, oflag : LibC::Int, mode : LibC::ModeT) : LibC::Int
   fun shm_unlink(name : LibC::Char*) : LibC::Int
@@ -69,5 +73,8 @@ lib LibIPC
   fun sem_init(sem : Void*, pshared : LibC::Int, value : LibC::UInt) : LibC::Int
   fun sem_destroy(sem : Void*) : LibC::Int
   fun sem_post(sem : Void*) : LibC::Int
+  fun sem_wait(sem : Void*) : LibC::Int
   fun sem_trywait(sem : Void*) : LibC::Int
+  fun sem_timedwait(sem : Void*, abs_timeout : LibC::Timespec*) : LibC::Int
+  fun clock_gettime(clock : LibC::Int, tp : LibC::Timespec*) : LibC::Int
 end

@@ -198,6 +198,25 @@ module IPCMail
     Monitor.open(uri, timeout)
   end
 
+  def self.unlink(uri : String) : Bool
+    address = Address.parse(uri)
+    case address.scheme
+    when "shm", "bus"
+      removed = Buffer.unlink(address.target)
+      File.delete?(Signal.path_for(address.target, "a"))
+      File.delete?(Signal.path_for(address.target, "b"))
+      File.delete?(Signal.path_for(address.target, "overflow"))
+      LibIPC::MAX_SUBSCRIBERS.times do |slot|
+        File.delete?(Signal.path_for(address.target, "sub#{slot}"))
+      end
+      removed
+    when "unix", "fifo"
+      File.delete?(address.target)
+    else
+      raise SchemeError.new("cannot unlink #{address.scheme}:// endpoints")
+    end
+  end
+
   private def self.config(address : Address, capacity, block_size, blocks, trace,
                           subscribers, overflow, mode) : Config
     Config.new(

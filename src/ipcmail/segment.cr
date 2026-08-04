@@ -1,10 +1,9 @@
 # src/ipcmail/segment.cr
 class IPCMail::Segment
   MAGIC        = 0x49504d42_u32
-  VERSION      =          5_u32
+  VERSION      =          6_u32
   STALL        = 250.milliseconds
-  SPIN_LIMIT   = 64
-  BACKOFF      = 200.microseconds
+  LOCK_WAIT    = 50.milliseconds
   ATTACH_RETRY = 500.microseconds
 
   getter name     : String
@@ -181,6 +180,41 @@ class IPCMail::Segment
     @header.value.subscriber_count
   end
 
+  def register_endpoint : Int32
+    synchronize do
+      endpoints = endpoint_slots
+      pid       = Process.pid.to_u32
+      2.times do |slot|
+        existing = endpoints[slot]
+        next unless existing == 0 || !Process.exists?(existing.to_i32)
+        endpoints[slot] = pid
+        return slot
+      end
+      raise Error.new("segment #{@name} already has two live point-to-point endpoints")
+    end
+  end
+
+  def release_endpoint(slot : Int32) : Nil
+    return if slot < 0 || slot > 1
+    synchronize { endpoint_slots[slot] = 0_u32 }
+  end
+
+  def owner_pid : UInt32
+    owner_flag.value.get(:acquire)
+  end
+
+  def damaged? : Bool
+    @header.value.damaged != 0
+  end
+
+  def attach_count : UInt32
+    attach_flag.value.get(:acquire)
+  end
+
+  def generation : UInt32
+    @header.value.generation
+  end
+
   def synchronize(&)
     lock
     begin
@@ -192,15 +226,20 @@ class IPCMail::Segment
 
   def lock : Nil
     return if try_lock
-    spins   = 0
     started = Time.instant
 
-    until try_lock
-      spins += 1
-      spins < SPIN_LIMIT ? Fiber.yield : sleep(BACKOFF)
-      if Time.instant - started > STALL
-        steal_from_dead_owner
-        started = Time.instant
+    loop do
+      case blocking_wait(LOCK_WAIT)
+      when :acquired
+        take_ownership
+        return
+      when :timeout
+        if Time.instant - started > STALL
+          steal_from_dead_owner
+          started = Time.instant
+        end
+      when :interrupted
+        # retry
       end
     end
   end
@@ -212,12 +251,39 @@ class IPCMail::Segment
 
   private def try_lock : Bool
     return false unless LibIPC.sem_trywait(lock_semaphore) == 0
+    take_ownership
+    true
+  end
+
+  private def take_ownership : Nil
     owner_flag.value.set(Process.pid.to_u32, :release)
     if @header.value.damaged != 0
       @header.value.damaged = 0_u32
       recover
     end
-    true
+  end
+
+  private def blocking_wait(cap : Time::Span) : Symbol
+    deadline = realtime_after(cap)
+    result   = LibIPC.sem_timedwait(lock_semaphore, pointerof(deadline))
+    return :acquired if result == 0
+
+    errno = Errno.value
+    case errno
+    when Errno::ETIMEDOUT then :timeout
+    when Errno::EINTR     then :interrupted
+    else                       :interrupted
+    end
+  end
+
+  private def realtime_after(span : Time::Span) : LibC::Timespec
+    now = uninitialized LibC::Timespec
+    LibIPC.clock_gettime(LibIPC::CLOCK_REALTIME, pointerof(now))
+    nanos = now.tv_nsec.to_i64 + span.total_nanoseconds.to_i64
+    ts    = uninitialized LibC::Timespec
+    ts.tv_sec = typeof(ts.tv_sec).new(now.tv_sec.to_i64 + nanos // 1_000_000_000)
+    ts.tv_nsec = typeof(ts.tv_nsec).new(nanos % 1_000_000_000)
+    ts
   end
 
   private def steal_from_dead_owner : Nil
@@ -240,6 +306,8 @@ class IPCMail::Segment
   end
 
   private def recover : Nil
+    @header.value.generation = @header.value.generation &+ 1_u32
+
     queues = queue_pointer
     4.times do |index|
       queue = queues[index]
@@ -267,12 +335,7 @@ class IPCMail::Segment
         queue.head = 0_u32 if queue.head >= capacity
         queue.tail = 0_u32 if queue.tail >= capacity
         rings[priority] = queue
-        descriptors = subscriber_descriptors(slot.to_u32, priority.to_u32)
-        cursor      = queue.tail
-        while cursor != queue.head
-          live[descriptors[cursor].block] += 1
-          cursor = (cursor &+ 1) % capacity
-        end
+        count_live(live, subscriber_descriptors(slot.to_u32, priority.to_u32), queue)
       end
     end
 
@@ -285,13 +348,7 @@ class IPCMail::Segment
     end
 
     4.times do |lane|
-      queue       = queues[lane]
-      descriptors = descriptors_for(lane)
-      cursor      = queue.tail
-      while cursor != queue.head
-        live[descriptors[cursor].block] += 1
-        cursor = (cursor &+ 1) % capacity
-      end
+      count_live(live, descriptors_for(lane), queues[lane])
     end
 
     @layout.block_count.times do |index|
@@ -301,6 +358,16 @@ class IPCMail::Segment
       next if Process.exists?(owner.to_i32)
       owners[index] = 0_u32
       references[index] = 0_u32
+    end
+  end
+
+  private def count_live(live : Array(UInt32), descriptors : Pointer(LibIPC::Descriptor),
+                         queue : LibIPC::Queue) : Nil
+    cursor = queue.tail
+    while cursor != queue.head
+      block = descriptors[cursor].block
+      live[block] += 1 if block < @layout.block_count
+      cursor = (cursor &+ 1) % capacity
     end
   end
 
@@ -521,6 +588,10 @@ class IPCMail::Segment
 
   protected def attach_flag : Pointer(Atomic(UInt32))
     (@base + offsetof(LibIPC::Header, @attach_count)).as(Atomic(UInt32)*)
+  end
+
+  private def endpoint_slots : Pointer(UInt32)
+    (@base + offsetof(LibIPC::Header, @endpoints)).as(UInt32*)
   end
 
   private def queue_pointer : Pointer(LibIPC::Queue)

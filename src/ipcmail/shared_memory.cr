@@ -8,6 +8,9 @@ module IPCMail
     getter overflow : Overflow
     getter? closed  : Bool
 
+    @inbox    : Signal
+    @endpoint : Int32
+
     def self.create(name : String, capacity : Int = 32, block_size : Int = 256, blocks : Int = 64,
                     trace : Int = 0, overflow : Overflow = :fail, mode : Int = 0o600) : SharedMemory
       create(name, Config.new(capacity: capacity, block_size: block_size, blocks: blocks,
@@ -36,8 +39,14 @@ module IPCMail
     end
 
     protected def initialize(@segment : Segment, @overflow : Overflow, mode : UInt32)
+      @endpoint = @segment.register_endpoint
       inbox, outbox = @segment.creator? ? {"a", "b"} : {"b", "a"}
-      @inbox         = Signal.new(Signal.path_for(@segment.name, inbox), mode)
+      @inbox = begin
+        Signal.new(Signal.path_for(@segment.name, inbox), mode)
+      rescue error
+        @segment.release_endpoint(@endpoint)
+        raise error
+      end
       @outbox        = Signal::Sender.new(Signal.path_for(@segment.name, outbox))
       @transmit_lane = @segment.creator? ? 0 : 2
       @receive_lane  = @segment.creator? ? 2 : 0
@@ -104,6 +113,7 @@ module IPCMail
     def close : Nil
       return if @closed
       @closed = true
+      @segment.release_endpoint(@endpoint) rescue nil
       @inbox.close
       @outbox.close
       @spill.try &.close

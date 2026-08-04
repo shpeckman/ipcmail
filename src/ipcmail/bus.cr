@@ -50,6 +50,10 @@ module IPCMail
       @segment.block_size
     end
 
+    def capacity : UInt32
+      @segment.capacity
+    end
+
     def subscribers : UInt32
       @segment.subscriber_count
     end
@@ -210,7 +214,11 @@ module IPCMail
           @segment.each_subscriber do |slot, subscriber|
             next unless interested?(subscriber, type)
             if @segment.subscriber_full?(slot, priority)
-              crowded = true
+              if subscriber.pid != 0 && !Process.exists?(subscriber.pid.to_i32)
+                @segment.release_subscriber(slot)
+              else
+                crowded = true
+              end
             else
               matched << slot
             end

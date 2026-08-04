@@ -12,14 +12,23 @@ class IPCMail::Monitor
     getter trace_capacity  : UInt32
     getter lanes           : Array(UInt32)
     getter rings           : Array(Tuple(UInt32, UInt32, UInt32))
+    getter? damaged        : Bool
+    getter owner_pid       : UInt32
+    getter attach_count    : UInt32
+    getter generation      : UInt32
 
     def initialize(@name, @kind, @capacity, @block_size, @block_count, @blocks_in_use,
-                   @subscribers, @max_subscribers, @trace_capacity, @lanes, @rings)
+                   @subscribers, @max_subscribers, @trace_capacity, @lanes, @rings,
+                   @damaged, @owner_pid, @attach_count, @generation)
     end
 
     def usage : Float64
       return 0.0 if @block_count == 0
       @blocks_in_use / @block_count.to_f * 100
+    end
+
+    def owner_alive? : Bool
+      @owner_pid != 0 && Process.exists?(@owner_pid.to_i32)
     end
   end
 
@@ -45,6 +54,10 @@ class IPCMail::Monitor
     lanes = [] of UInt32
     rings = [] of Tuple(UInt32, UInt32, UInt32)
 
+    owner        = @segment.owner_pid
+    damaged      = @segment.damaged?
+    attach_count = @segment.attach_count
+
     @segment.synchronize do
       4.times { |lane| lanes << @segment.depth(lane) }
       @segment.each_subscriber do |slot, subscriber|
@@ -53,7 +66,8 @@ class IPCMail::Monitor
 
       Stats.new(@segment.name, @segment.kind, @segment.capacity, @segment.block_size,
         @segment.layout.block_count, @segment.blocks_in_use, @segment.subscriber_count,
-        @segment.max_subscribers, @segment.trace_capacity, lanes, rings)
+        @segment.max_subscribers, @segment.trace_capacity, lanes, rings,
+        damaged, owner, attach_count, @segment.generation)
     end
   end
 
