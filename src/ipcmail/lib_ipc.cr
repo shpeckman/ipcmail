@@ -2,7 +2,23 @@
 lib LibIPC
   {% if flag?(:linux) %}
     SO_PEERCRED = 17
+    O_NOCTTY    =       0o400
+    TIOCGWINSZ  =  0x5413_u64
+    TIOCSWINSZ  =  0x5414_u64
+  {% elsif flag?(:darwin) %}
+    O_NOCTTY   =        0o400000
+    TIOCGWINSZ = 0x40087468_u64
+    TIOCSWINSZ = 0x80087467_u64
+  {% elsif flag?(:freebsd) %}
+    O_NOCTTY   =        0o100000
+    TIOCGWINSZ = 0x40087468_u64
+    TIOCSWINSZ = 0x80087467_u64
+  {% else %}
+    O_NOCTTY   =        0o400000
+    TIOCGWINSZ = 0x40087468_u64
+    TIOCSWINSZ = 0x80087467_u64
   {% end %}
+
   MAX_SUBSCRIBERS = 16
   MAX_TYPES       =  8
   SEM_WORDS       =  8
@@ -11,6 +27,13 @@ lib LibIPC
     pid : LibC::PidT
     uid : LibC::UidT
     gid : LibC::GidT
+  end
+
+  struct Winsize
+    ws_row    : LibC::UShort
+    ws_col    : LibC::UShort
+    ws_xpixel : LibC::UShort
+    ws_ypixel : LibC::UShort
   end
 
   struct Queue
@@ -80,7 +103,15 @@ lib LibIPC
   fun sem_timedwait(sem : Void*, abs_timeout : LibC::Timespec*) : LibC::Int
   fun clock_gettime(clock : LibC::Int, tp : LibC::Timespec*) : LibC::Int
 
-  {% unless flag?(:linux) %}
+  fun posix_openpt(oflag : LibC::Int) : LibC::Int
+  fun grantpt(fd : LibC::Int) : LibC::Int
+  fun unlockpt(fd : LibC::Int) : LibC::Int
+  fun ioctl(fd : LibC::Int, request : LibC::ULong, ...) : LibC::Int
+
+  {% if flag?(:linux) %}
+    fun ptsname_r(fd : LibC::Int, buf : LibC::Char*, buflen : LibC::SizeT) : LibC::Int
+  {% else %}
+    fun ptsname(fd : LibC::Int) : LibC::Char*
     fun getpeereid(fd : LibC::Int, uid : LibC::UidT*, gid : LibC::GidT*) : LibC::Int
   {% end %}
 end

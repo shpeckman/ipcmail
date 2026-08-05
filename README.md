@@ -9,6 +9,7 @@ primitives that share one URI-addressed API:
 - **`bus://`** — shared-memory broadcast bus with per-subscriber rings and type filtering.
 - **`unix://`** — Unix domain socket transport with optional length framing and peer authentication.
 - **`fifo://`** — named FIFO pipe transport for one-way streaming.
+- **`pty://`** — pseudoterminal transport for driving terminal-oriented child processes.
 
 The shared-memory transports are lock-protected with a robust, self-healing
 mutex: if a process dies while holding the lock or owning message blocks, the
@@ -17,7 +18,9 @@ reclaims the dead owner's blocks.
 
 Requires Crystal `>= 1.21.0`. Primary target is Linux; the Unix-socket
 transport also runs on macOS/BSD (peer credentials fall back to `getpeereid`,
-which reports uid/gid but not pid).
+which reports uid/gid but not pid). The pseudoterminal transport is POSIX-wide;
+it resolves the slave device with `ptsname_r` on Linux and `ptsname`
+elsewhere.
 
 ## Installation
 
@@ -65,6 +68,7 @@ crystal run examples/shared_memory.cr
 crystal run examples/bus.cr
 crystal run examples/socket.cr
 crystal run examples/pipe.cr
+crystal run examples/pty.cr
 crystal run examples/large_payload.cr
 crystal run examples/monitor.cr
 ```
@@ -80,29 +84,40 @@ host/path is the endpoint name, and query parameters tune it.
 | `bus://`  | broadcast bus             | `IPCMail.create` | `IPCMail.open` |
 | `unix://` | Unix domain socket        | `IPCMail.listen` | `IPCMail.open` |
 | `fifo://` | named FIFO pipe           | `IPCMail.create` | `IPCMail.open` |
+| `pty://`  | pseudoterminal            | `IPCMail.create` | `IPCMail.open` |
 
 Shared-memory names map directly to POSIX `shm_open` objects, so a leading
 slash is normalized in for you (`shm://example` targets `/example`). Unix and
 FIFO targets are filesystem paths (`unix:///tmp/app.sock`).
+
+`pty://` is the one scheme with no name of its own: the kernel allocates the
+device. Create it with an empty target (`pty://`) and attach to the slave it
+reports by path (`pty:///dev/pts/7`).
 
 ### Query parameters
 
 Parameters set on the URI are equivalent to the keyword arguments on the
 factory methods; explicit keyword arguments win over the URI.
 
-| Parameter             | Applies to     | Meaning                                         | Default |
-|-----------------------|----------------|-------------------------------------------------|---------|
-| `capacity`, `msgs`    | `shm`, `bus`   | ring slots per lane (must be ≥ 2)               | `32`    |
-| `block_size`, `bsize` | `shm`, `bus`   | max bytes per message block                     | `256`   |
-| `blocks`, `bcount`    | `shm`, `bus`   | number of shared payload blocks                 | `64`    |
-| `subscribers`, `subs` | `bus`          | max concurrent subscribers (1–16)               | `16`    |
-| `trace`               | `shm`, `bus`   | ring size for the trace buffer (0 disables)     | `0`     |
-| `overflow`            | `shm`, `bus`   | `fail`, `block`, or `spill`                     | `fail`  |
-| `mode`, `permissions` | all            | octal file mode for created objects             | `0600`  |
-| `direction`           | `fifo`         | `read` or `write`                               | —       |
-| `framed`              | `unix`, `fifo` | length-prefix messages                          | `true`  |
-| `stream`              | `unix`, `fifo` | inverse of `framed` (`?stream=true` ⇒ unframed) | —       |
-| `authenticate`        | `unix`         | reject peers not owned by the current user      | `false` |
+| Parameter             | Applies to            | Meaning                                         | Default |
+|-----------------------|-----------------------|-------------------------------------------------|---------|
+| `capacity`, `msgs`    | `shm`, `bus`          | ring slots per lane (must be ≥ 2)               | `32`    |
+| `block_size`, `bsize` | `shm`, `bus`          | max bytes per message block                     | `256`   |
+| `blocks`, `bcount`    | `shm`, `bus`          | number of shared payload blocks                 | `64`    |
+| `subscribers`, `subs` | `bus`                 | max concurrent subscribers (1–16)               | `16`    |
+| `trace`               | `shm`, `bus`          | ring size for the trace buffer (0 disables)     | `0`     |
+| `overflow`            | `shm`, `bus`          | `fail`, `block`, or `spill`                     | `fail`  |
+| `mode`, `permissions` | all                   | octal file mode for created objects             | `0600`  |
+| `direction`           | `fifo`                | `read` or `write`                               | —       |
+| `framed`              | `unix`, `fifo`, `pty` | length-prefix messages                          | `true`* |
+| `stream`              | `unix`, `fifo`, `pty` | inverse of `framed` (`?stream=true` ⇒ unframed) | —       |
+| `authenticate`        | `unix`                | reject peers not owned by the current user      | `false` |
+| `rows`                | `pty`                 | initial terminal row count                      | —       |
+| `columns`, `cols`     | `pty`                 | initial terminal column count                   | —       |
+| `raw`                 | `pty`                 | put the line discipline in raw mode             | `true`  |
+
+\* `framed` defaults to `false` on `pty://`, which carries a terminal byte
+stream rather than discrete messages.
 
 Example: `bus://events?subs=4&bsize=1024&trace=64&overflow=block`
 
@@ -219,6 +234,62 @@ writer.close
 `IPCMail::Pipe.pair` also returns an in-process reader/writer pair backed by an
 anonymous pipe, useful for tests and parent/child hand-offs.
 
+### Pseudoterminals (`pty://`)
+
+A pty is a bidirectional endpoint for programs that expect a terminal rather
+than a pipe — line editors, shells, and anything that changes behaviour when
+`isatty` is false. Creating one allocates the device; the master is returned to
+you and the child is attached to the slave.
+
+```crystal
+master = IPCMail.create(IPCMail::Pty, "pty://?rows=24&cols=80")
+
+slave = File.open(master.slave_path, "r+")
+child = Process.new("/bin/sh", ["-c", "printf 'ready\\n'"],
+  input: slave, output: slave, error: slave)
+child.wait
+
+puts master.receive(timeout: 1.second).text   # => "ready\n"
+
+master.resize(rows: 40, columns: 132)
+
+slave.close
+master.close
+```
+
+Unlike the other stream transports, a pty defaults to **unframed** and to
+**raw** mode. Both defaults exist for the same reason: a cooked line discipline
+rewrites the byte stream (`ONLCR` turns `\n` into `\r\n`), which corrupts binary
+payloads and framing headers alike. Raw mode makes the transport byte
+transparent; framing on top of it is opt-in with `framed: true`.
+
+Terminal geometry is part of the endpoint:
+
+```crystal
+master.winsize                       # => 24x80
+master.winsize.rows                  # => 24_u16
+master.resize(columns: 120)          # leaves the other dimensions alone
+master.winsize = IPCMail::Pty::Winsize.new(40, 132, 640, 480)
+```
+
+Both ends see the same geometry and the same line discipline, so `raw!` and
+`resize` may be called from either.
+
+Closing the last slave descriptor is a **hangup**, not an end-of-file: the
+master's next read fails with `EIO`, which surfaces as `ClosedError` (and is
+absorbed by `each`). Output already buffered stays readable, but the portable
+pattern is to keep a slave descriptor open in the parent for as long as you
+intend to read — as the example above does.
+
+`IPCMail::Pty.pair` returns a connected master/slave pair in one call, useful
+for tests and for handing the slave to a child directly:
+
+```crystal
+master, slave = IPCMail::Pty.pair(rows: 24, columns: 80)
+master.send("hello")
+slave.receive(timeout: 1.second).text   # => "hello"
+```
+
 ### Large / out-of-band payloads
 
 Payloads bigger than the block size are staged in a shared buffer and handed
@@ -327,6 +398,10 @@ IPCMail.unlink("shm://chat")
 IPCMail.unlink("unix:///tmp/app.sock")
 ```
 
+A `pty://` endpoint owns no persistent artifact — the kernel reclaims the
+device once both ends close — so `unlink` rejects it, as does `monitor`, which
+only inspects shared-memory segments.
+
 Every mailbox also has a finalizer, but explicit `close` (or the block forms
 below) is strongly preferred.
 
@@ -348,19 +423,19 @@ end
 
 ### Module `IPCMail`
 
-| Method                                           | Description                                                                          |
-|--------------------------------------------------|--------------------------------------------------------------------------------------|
-| `create(uri, **opts)` / `create(uri, **opts, &)` | Create a `shm`/`bus`/`fifo` endpoint.                                                |
-| `create(Kind, uri, **opts)`                      | Typed create; `Kind` is `SharedMemory`, `Bus`, or `Pipe`. Returns the concrete type. |
-| `open(uri, **opts)` / `open(uri, **opts, &)`     | Attach to an existing endpoint.                                                      |
-| `open(Kind, uri, **opts)`                        | Typed open; `Kind` is `SharedMemory`, `Bus`, `Socket`, or `Pipe`.                    |
-| `listen(uri, **opts)` / `listen(uri, **opts, &)` | Create a `unix://` server (`Socket::Server`).                                        |
-| `monitor(uri, timeout = 5.seconds)`              | Read-only `Monitor` for a live `shm`/`bus` segment.                                  |
-| `unlink(uri) : Bool`                             | Force-remove an endpoint's OS artifacts.                                             |
+| Method                                           | Description                                                                                 |
+|--------------------------------------------------|---------------------------------------------------------------------------------------------|
+| `create(uri, **opts)` / `create(uri, **opts, &)` | Create a `shm`/`bus`/`fifo`/`pty` endpoint.                                                 |
+| `create(Kind, uri, **opts)`                      | Typed create; `Kind` is `SharedMemory`, `Bus`, `Pipe`, or `Pty`. Returns the concrete type. |
+| `open(uri, **opts)` / `open(uri, **opts, &)`     | Attach to an existing endpoint.                                                             |
+| `open(Kind, uri, **opts)`                        | Typed open; `Kind` is `SharedMemory`, `Bus`, `Socket`, `Pipe`, or `Pty`.                    |
+| `listen(uri, **opts)` / `listen(uri, **opts, &)` | Create a `unix://` server (`Socket::Server`).                                               |
+| `monitor(uri, timeout = 5.seconds)`              | Read-only `Monitor` for a live `shm`/`bus` segment.                                         |
+| `unlink(uri) : Bool`                             | Force-remove an endpoint's OS artifacts.                                                    |
 
 Common options: `capacity`, `block_size`, `blocks`, `subscribers`, `trace`,
-`overflow`, `mode`, `framed`, `direction`, `authenticate`, `backlog`,
-`timeout`.
+`overflow`, `mode`, `framed`, `direction`, `raw`, `rows`, `columns`,
+`authenticate`, `backlog`, `timeout`.
 
 ### `IPCMail::Mailbox` (base of every transport)
 
@@ -405,6 +480,16 @@ backlog = SOMAXCONN, mode = 0o600)`, `accept(timeout)`, `accept?(timeout)`,
 `Pipe.fifo(path, direction, framed = true, timeout = 5.seconds, mode = 0o600)`,
 `Pipe.pair(framed = true)`, `path`, `unlink`.
 
+### `IPCMail::Pty < Stream`
+
+`Pty.open(framed = false, raw = true, rows = nil, columns = nil)` allocates a
+device and returns the master; `Pty.attach(path, framed = false, raw = false,
+rows = nil, columns = nil)` opens a slave by path; `Pty.pair(framed = false,
+raw = true, rows = nil, columns = nil)` returns both. Adds `slave_path`,
+`master?`, `slave?`, `winsize`, `winsize=`,
+`resize(rows = nil, columns = nil, x_pixels = nil, y_pixels = nil)`, `raw!`,
+and `raw?`, plus the `Mailbox` send/receive methods.
+
 ### `IPCMail::Buffer`
 
 Raw named shared-memory region for manual out-of-band data.
@@ -427,6 +512,7 @@ plus `to_slice`, `to_unsafe`, `size`, `close(unlink = nil)`. Both `create` and
 - **`View`** — borrowed, zero-copy counterpart of `Message`; `copy` promotes it to a `Message`.
 - **`TraceRecord`** — `at`, `sequence`, `type`, `size`, `priority`, `lane`, `event`.
 - **`Credentials`** — `pid : Int32?`, `uid : UInt32`, `gid : UInt32`.
+- **`Pty::Winsize`** — terminal geometry; `rows`, `columns`, `x_pixels`, `y_pixels`, all `UInt16`.
 - **`Config`** — the fully-resolved segment configuration.
 - **`Handle`** — reference to an out-of-band buffer (used internally by `send_large`).
 

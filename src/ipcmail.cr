@@ -17,6 +17,7 @@ require "./ipcmail/bus"
 require "./ipcmail/stream"
 require "./ipcmail/socket"
 require "./ipcmail/pipe"
+require "./ipcmail/pty"
 require "./ipcmail/address"
 require "./ipcmail/monitor"
 
@@ -26,11 +27,11 @@ module IPCMail
   def self.create(uri : String, *, capacity : Int? = nil, block_size : Int? = nil,
                   blocks : Int? = nil, trace : Int? = nil, subscribers : Int? = nil,
                   overflow : Overflow? = nil, mode : Int? = nil, framed : Bool? = nil,
-                  direction : Pipe::Direction? = nil,
-                  timeout : Time::Span? = 5.seconds) : Mailbox
+                  direction : Pipe::Direction? = nil, raw : Bool? = nil, rows : Int? = nil,
+                  columns : Int? = nil, timeout : Time::Span? = 5.seconds) : Mailbox
     build(uri, capacity: capacity, block_size: block_size, blocks: blocks, trace: trace,
       subscribers: subscribers, overflow: overflow, mode: mode, framed: framed,
-      direction: direction, timeout: timeout)
+      direction: direction, raw: raw, rows: rows, columns: columns, timeout: timeout)
   end
 
   def self.create(uri : String, **options, &)
@@ -57,6 +58,11 @@ module IPCMail
     build(uri, **options).as(Pipe)
   end
 
+  def self.create(kind : Pty.class, uri : String, **options) : Pty
+    expect(uri, "pty", "create")
+    build(uri, **options).as(Pty)
+  end
+
   def self.create(kind : T.class, uri : String, **options, &) forall T
     mailbox = create(kind, uri, **options)
     begin
@@ -69,7 +75,8 @@ module IPCMail
   private def self.build(uri : String, *, capacity : Int? = nil, block_size : Int? = nil,
                          blocks : Int? = nil, trace : Int? = nil, subscribers : Int? = nil,
                          overflow : Overflow? = nil, mode : Int? = nil, framed : Bool? = nil,
-                         direction : Pipe::Direction | Symbol | Nil = nil,
+                         direction : Pipe::Direction | Symbol | Nil = nil, raw : Bool? = nil,
+                         rows : Int? = nil, columns : Int? = nil,
                          timeout : Time::Span? = 5.seconds) : Mailbox
     address  = Address.parse(uri)
     settings = config(address, capacity, block_size, blocks, trace, subscribers, overflow, mode)
@@ -82,16 +89,23 @@ module IPCMail
     when "fifo"
       Pipe.fifo(address.target, direction(address, direction), framed: framed?(address, framed),
         timeout: timeout, mode: settings.mode)
+    when "pty"
+      unless address.target.empty?
+        raise SchemeError.new("pty://#{address.target} already exists, attach to it with IPCMail.open(#{uri.inspect})")
+      end
+      Pty.open(framed: framed?(address, framed, false), raw: raw?(address, raw, true),
+        rows: rows || address.rows?, columns: columns || address.columns?)
     else
       raise SchemeError.new("#{address.scheme}:// endpoints are created with IPCMail.listen(#{uri.inspect})")
     end
   end
 
   def self.open(uri : String, *, overflow : Overflow? = nil, mode : Int? = nil,
-                framed : Bool? = nil, direction : Pipe::Direction? = nil,
+                framed : Bool? = nil, direction : Pipe::Direction? = nil, raw : Bool? = nil,
+                rows : Int? = nil, columns : Int? = nil,
                 timeout : Time::Span? = 5.seconds) : Mailbox
-    attach(uri, overflow: overflow, mode: mode, framed: framed,
-      direction: direction, timeout: timeout)
+    attach(uri, overflow: overflow, mode: mode, framed: framed, direction: direction,
+      raw: raw, rows: rows, columns: columns, timeout: timeout)
   end
 
   def self.open(uri : String, **options, &)
@@ -123,6 +137,11 @@ module IPCMail
     attach(uri, **options).as(Pipe)
   end
 
+  def self.open(kind : Pty.class, uri : String, **options) : Pty
+    expect(uri, "pty", "open")
+    attach(uri, **options).as(Pty)
+  end
+
   def self.open(kind : T.class, uri : String, **options, &) forall T
     mailbox = open(kind, uri, **options)
     begin
@@ -134,6 +153,7 @@ module IPCMail
 
   private def self.attach(uri : String, *, overflow : Overflow? = nil, mode : Int? = nil,
                           framed : Bool? = nil, direction : Pipe::Direction | Symbol | Nil = nil,
+                          raw : Bool? = nil, rows : Int? = nil, columns : Int? = nil,
                           timeout : Time::Span? = 5.seconds) : Mailbox
     address     = Address.parse(uri)
     policy      = overflow || address.overflow? || Overflow::Fail
@@ -149,6 +169,13 @@ module IPCMail
     when "fifo"
       Pipe.fifo(address.target, direction(address, direction), framed: framed?(address, framed),
         timeout: timeout, mode: permissions)
+    when "pty"
+      if address.target.empty?
+        raise SchemeError.new(%(pty:// endpoints are opened by device path, allocate a new one with IPCMail.create("pty://")))
+      end
+      Pty.attach(address.target, framed: framed?(address, framed, false),
+        raw: raw?(address, raw, false), rows: rows || address.rows?,
+        columns: columns || address.columns?)
     else
       raise SchemeError.new("unsupported scheme #{address.scheme.inspect}")
     end
@@ -230,10 +257,16 @@ module IPCMail
     )
   end
 
-  private def self.framed?(address : Address, override : Bool?) : Bool
+  private def self.framed?(address : Address, override : Bool?, default : Bool = true) : Bool
     return override unless override.nil?
     framed = address.framed?
-    framed.nil? ? true : framed
+    framed.nil? ? default : framed
+  end
+
+  private def self.raw?(address : Address, override : Bool?, default : Bool) : Bool
+    return override unless override.nil?
+    raw = address.raw?
+    raw.nil? ? default : raw
   end
 
   private def self.direction(address : Address, override : Pipe::Direction | Symbol | Nil) : Pipe::Direction

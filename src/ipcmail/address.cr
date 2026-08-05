@@ -1,6 +1,7 @@
 # src/ipcmail/address.cr
 struct IPCMail::Address
-  SCHEMES = %w[shm bus unix fifo]
+  SCHEMES   = %w[shm bus unix fifo pty]
+  ANONYMOUS = %w[pty]
 
   getter scheme : String
   getter target : String
@@ -15,7 +16,9 @@ struct IPCMail::Address
     end
 
     target = "#{parsed.host}#{parsed.path}"
-    raise ArgumentError.new("#{uri.inspect} has no target") if target.empty?
+    if target.empty? && !ANONYMOUS.includes?(scheme)
+      raise ArgumentError.new("#{uri.inspect} has no target")
+    end
     new(scheme, target, parsed.query_params)
   end
 
@@ -65,6 +68,18 @@ struct IPCMail::Address
     return Pipe::Direction::Read if boolean?("read")
     return nil unless value
     Pipe::Direction.parse?(value) || raise ArgumentError.new("#{value.inspect} is not a known direction")
+  end
+
+  def raw? : Bool?
+    boolean?("raw")
+  end
+
+  def rows? : Int32?
+    integer?("rows")
+  end
+
+  def columns? : Int32?
+    integer?("columns", "cols")
   end
 
   def framed? : Bool?

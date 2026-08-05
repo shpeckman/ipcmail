@@ -38,6 +38,25 @@ describe IPCMail::Address do
     IPCMail::Address.parse("fifo:///p?read=1").direction?.should eq(IPCMail::Pipe::Direction::Read)
   end
 
+  it "allows an anonymous pty target" do
+    address = IPCMail::Address.parse("pty://")
+    address.scheme.should eq("pty")
+    address.target.should be_empty
+  end
+
+  it "parses a pty device path" do
+    IPCMail::Address.parse("pty:///dev/pts/3").target.should eq("/dev/pts/3")
+  end
+
+  it "reads pty geometry and raw mode" do
+    address = IPCMail::Address.parse("pty://?rows=30&cols=100&raw=1")
+    address.rows?.should eq(30)
+    address.columns?.should eq(100)
+    address.raw?.should be_true
+    IPCMail::Address.parse("pty://?columns=80").columns?.should eq(80)
+    IPCMail::Address.parse("pty://").raw?.should be_nil
+  end
+
   it "rejects an unknown scheme" do
     expect_raises(ArgumentError, /unsupported scheme/) { IPCMail::Address.parse("tcp://host") }
   end
