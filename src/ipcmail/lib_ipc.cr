@@ -1,20 +1,20 @@
 # src/ipcmail/lib_ipc.cr
 lib LibIPC
   {% if flag?(:linux) %}
-    SO_PEERCRED = 17
-    O_NOCTTY    =       0o400
-    TIOCGWINSZ  =  0x5413_u64
-    TIOCSWINSZ  =  0x5414_u64
+    SO_PEERCRED =         17
+    O_NOCTTY    =      0o400
+    TIOCGWINSZ  = 0x5413_u64
+    TIOCSWINSZ  = 0x5414_u64
   {% elsif flag?(:darwin) %}
-    O_NOCTTY   =        0o400000
+    O_NOCTTY   =       0o400000
     TIOCGWINSZ = 0x40087468_u64
     TIOCSWINSZ = 0x80087467_u64
   {% elsif flag?(:freebsd) %}
-    O_NOCTTY   =        0o100000
+    O_NOCTTY   =       0o100000
     TIOCGWINSZ = 0x40087468_u64
     TIOCSWINSZ = 0x80087467_u64
   {% else %}
-    O_NOCTTY   =        0o400000
+    O_NOCTTY   =       0o400000
     TIOCGWINSZ = 0x40087468_u64
     TIOCSWINSZ = 0x80087467_u64
   {% end %}

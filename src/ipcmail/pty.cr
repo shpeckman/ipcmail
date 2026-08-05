@@ -79,9 +79,9 @@ module IPCMail
     end
 
     def winsize=(value : Winsize) : Winsize
-      size           = LibIPC::Winsize.new
-      size.ws_row    = value.rows
-      size.ws_col    = value.columns
+      size = LibIPC::Winsize.new
+      size.ws_row = value.rows
+      size.ws_col = value.columns
       size.ws_xpixel = value.x_pixels
       size.ws_ypixel = value.y_pixels
       control(LibIPC::TIOCSWINSZ, pointerof(size), "ioctl(TIOCSWINSZ)")
@@ -90,7 +90,7 @@ module IPCMail
 
     def resize(rows : Int? = nil, columns : Int? = nil, x_pixels : Int? = nil,
                y_pixels : Int? = nil) : Nil
-      current      = winsize
+      current = winsize
       self.winsize = Winsize.new(rows || current.rows, columns || current.columns,
         x_pixels || current.x_pixels, y_pixels || current.y_pixels)
     end
@@ -133,7 +133,7 @@ module IPCMail
 
     private def self.adopt(descriptor : Int32) : IO::FileDescriptor
       IO::FileDescriptor.set_blocking(descriptor, false)
-      io      = IO::FileDescriptor.new(descriptor)
+      io = IO::FileDescriptor.new(descriptor)
       io.sync = false
       io
     end
